@@ -2452,15 +2452,34 @@ _V4_AGENT_LABELS = {a["name"]: f"{a['icon']} {a['label']}" for a in _V4_AGENTS}
 def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> str:
     """
     Call a Cortex Agent via the REST API.
-    SNOWFLAKE.CORTEX.COMPLETE_AGENT does not exist as a SQL function;
-    agents are only reachable through /api/v2/cortex/agent:run.
+    In Streamlit-in-Snowflake, session.connection.rest is StoredProcRestful
+    which has no .token — the token lives at session.connection._session_token.
     """
     import requests as _req
 
     try:
-        db    = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
-        host  = session.connection.host
-        token = session.connection.rest.token
+        db   = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
+        conn = session.connection
+        host = conn.host
+
+        # StoredProcRestful (SiS) has no .token — use connection._session_token
+        token = None
+        for getter in [
+            lambda: conn._session_token,
+            lambda: conn.rest._session_token,
+            lambda: conn._rest.token,
+            lambda: conn.rest.token,
+        ]:
+            try:
+                t = getter()
+                if t:
+                    token = t
+                    break
+            except Exception:
+                continue
+
+        if not token:
+            return "Could not retrieve session token for REST API call."
     except Exception as e:
         return f"Session error: {e}"
 
