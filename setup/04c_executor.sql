@@ -1,0 +1,386 @@
+-- =============================================================================
+-- 04c_executor.sql  [v3]
+-- WORKFLOW_EXECUTOR: Generates Silver DDL via 3-retry self-correcting loop.
+--
+-- v3 changes (P0):
+--   - Reads output_schema from PIPELINE_CONTEXT (default: AGENT_FRAMEWORK_OUTPUT)
+--   - dry_run=TRUE by default: generates DDL, logs it, never executes
+--   - overwrite_existing=FALSE by default: aborts if target table has rows
+--   - Injects EXACT column list from INFORMATION_SCHEMA into prompt
+--     to prevent LLM column name hallucination
+-- =============================================================================
+
+USE DATABASE IDENTIFIER($TARGET_DB);
+
+CREATE OR REPLACE PROCEDURE AGENT_FRAMEWORK.WORKFLOW_EXECUTOR(execution_id VARCHAR)
+RETURNS VARIANT
+LANGUAGE SQL
+AS
+$$
+DECLARE
+    active_model        VARCHAR;
+    active_warehouse    VARCHAR;
+    pipeline_type       VARCHAR;
+    target_lag          VARCHAR;
+    output_schema       VARCHAR;
+    is_dry_run          BOOLEAN;
+    allow_overwrite     BOOLEAN;
+    brownfield_mode     BOOLEAN;
+    decisions_cursor CURSOR FOR
+        SELECT decision_id, source_table, transformation_strategy, recommended_actions, llm_reasoning
+        FROM   AGENT_FRAMEWORK.PLANNER_DECISIONS
+        WHERE  execution_id = ?
+        ORDER BY priority ASC;
+
+    generated_sql       VARCHAR;
+    execution_prompt    VARCHAR;
+    llm_response        VARCHAR;
+    retry_count         INTEGER;
+    max_retries         INTEGER DEFAULT 3;
+    execution_succeeded BOOLEAN;
+    last_error          VARCHAR;
+    execution_results   ARRAY DEFAULT ARRAY_CONSTRUCT();
+    success_count       INTEGER DEFAULT 0;
+    fail_count          INTEGER DEFAULT 0;
+    dry_run_count       INTEGER DEFAULT 0;
+    cur_source_table    VARCHAR;
+    cur_strategy        VARCHAR;
+    cur_actions         VARCHAR;
+    cur_reasoning       VARCHAR;
+    cur_schema_info     VARIANT;
+    contracts_context   TEXT;
+    directives_context  TEXT;
+    output_rules        TEXT;
+    target_table_name   VARCHAR;
+    target_fqn          VARCHAR;
+    existing_row_count  INTEGER DEFAULT 0;
+    col_list            VARCHAR;
+BEGIN
+    SELECT primary_model INTO :active_model
+    FROM AGENT_FRAMEWORK.MODEL_CONFIG
+    WHERE config_key = 'default' LIMIT 1;
+
+    SELECT CURRENT_WAREHOUSE() INTO :active_warehouse;
+
+    SELECT COALESCE(pipeline_type, 'CTAS'),
+           COALESCE(target_lag, '1 hour'),
+           COALESCE(NULLIF(output_schema, ''), 'AGENT_FRAMEWORK_OUTPUT'),
+           COALESCE(dry_run, TRUE),
+           COALESCE(overwrite_existing, FALSE),
+           COALESCE(brownfield_mode, FALSE)
+    INTO :pipeline_type, :target_lag, :output_schema, :is_dry_run, :allow_overwrite, :brownfield_mode
+    FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT
+    WHERE context_id = 1;
+
+    -- Safety: ensure the output schema exists before any execution attempt
+    EXECUTE IMMEDIATE 'CREATE SCHEMA IF NOT EXISTS ' || :output_schema;
+
+    UPDATE AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS
+    SET status = 'EXECUTING', current_phase = 'EXECUTOR'
+    WHERE execution_id = :execution_id;
+
+    INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+    SELECT :execution_id, 'EXECUTOR', 'STARTED',
+            'Executor started. model=' || :active_model ||
+            ', pipeline_type=' || :pipeline_type ||
+            ', output_schema=' || :output_schema ||
+            ', dry_run=' || :is_dry_run::VARCHAR ||
+            ', overwrite_existing=' || :allow_overwrite::VARCHAR ||
+            ', brownfield_mode=' || :brownfield_mode::VARCHAR ||
+            CASE WHEN :pipeline_type = 'DYNAMIC_TABLE'
+                 THEN ', target_lag=' || :target_lag ELSE '' END;
+
+    contracts_context := AGENT_FRAMEWORK.CONTRACTS_AS_PROMPT_CONTEXT('SILVER');
+
+    -- Build output rules once — parameterized by output_schema
+    IF (pipeline_type = 'DYNAMIC_TABLE') THEN
+        output_rules := '
+OUTPUT RULES (CRITICAL):
+- Output EXACTLY ONE SQL statement.
+- No markdown, no code fences, no backticks, no explanation.
+- Start directly with CREATE OR REPLACE DYNAMIC TABLE.
+- Target schema is ' || :output_schema || '. Use:
+  CREATE OR REPLACE DYNAMIC TABLE ' || :output_schema || '.<name>
+      TARGET_LAG = ''' || :target_lag || '''
+      WAREHOUSE = ' || :active_warehouse || '
+  AS
+  <SELECT ...>
+- NO semicolons anywhere in the output (not even at the end).
+- NO ALTER TABLE, no separate CLUSTER BY, no COMMENT ON.
+- ONLY use column names from the EXACT COLUMN LIST above. Do NOT invent column names.';
+    ELSE
+        output_rules := '
+OUTPUT RULES (CRITICAL):
+- Output EXACTLY ONE SQL statement.
+- No markdown, no code fences, no backticks, no explanation.
+- Start directly with CREATE OR REPLACE TABLE.
+- Target schema is ' || :output_schema || ':
+  CREATE OR REPLACE TABLE ' || :output_schema || '.<name> AS SELECT ...
+- NO semicolons anywhere in the output (not even at the end).
+- NO ALTER TABLE, no CLUSTER BY as a separate statement, no COMMENT ON.
+- The output must be a single CREATE OR REPLACE TABLE ... AS SELECT statement and nothing else.
+- ONLY use column names from the EXACT COLUMN LIST above. Do NOT invent column names.';
+    END IF;
+
+    OPEN decisions_cursor USING (execution_id);
+    FOR record IN decisions_cursor DO
+        cur_source_table := record.source_table;
+        cur_strategy     := record.transformation_strategy;
+        cur_actions      := record.recommended_actions::VARCHAR;
+        cur_reasoning    := record.llm_reasoning;
+        cur_schema_info  := (CALL AGENT_FRAMEWORK.DISCOVER_SCHEMA(:cur_source_table));
+
+        -- [P0-3] Fetch EXACT column list from source database's INFORMATION_SCHEMA
+        -- Uses EXECUTE IMMEDIATE to cross-database query when source is in a different DB
+        BEGIN
+            LET col_sql VARCHAR := 'SELECT LISTAGG(column_name, '', '') WITHIN GROUP (ORDER BY ordinal_position) FROM ' ||
+                SPLIT_PART(:cur_source_table, '.', 1) || '.INFORMATION_SCHEMA.COLUMNS WHERE ' ||
+                'UPPER(table_schema) = UPPER(''' || SPLIT_PART(:cur_source_table, '.', -2) || ''') AND ' ||
+                'UPPER(table_name)   = UPPER(''' || SPLIT_PART(:cur_source_table, '.', -1) || ''')';
+            LET col_rs  RESULTSET := (EXECUTE IMMEDIATE :col_sql);
+            LET col_cur CURSOR FOR col_rs;
+            OPEN col_cur;
+            FETCH col_cur INTO col_list;
+            CLOSE col_cur;
+        EXCEPTION WHEN OTHER THEN
+            col_list := NULL;
+        END;
+
+        IF (col_list IS NULL OR LENGTH(col_list) = 0) THEN
+            col_list := '(column list unavailable — verify source table exists)';
+        END IF;
+
+        SELECT AGENT_FRAMEWORK.DIRECTIVES_FOR_TABLE(
+            SPLIT_PART(:cur_source_table, '.', -1), 'SILVER'
+        ) INTO :directives_context;
+
+        -- Derive target FQN for safety checks
+        target_table_name := SPLIT_PART(:cur_source_table, '.', -1);
+        target_fqn        := :output_schema || '.' || :target_table_name;
+
+        -- [P0-1] Existence check: abort if target has rows and overwrite is disabled
+        existing_row_count := 0;
+        BEGIN
+            LET chk_rs  RESULTSET := (EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM ' || :target_fqn || ' LIMIT 1');
+            LET chk_cur CURSOR FOR chk_rs;
+            OPEN chk_cur;
+            FETCH chk_cur INTO existing_row_count;
+            CLOSE chk_cur;
+        EXCEPTION WHEN OTHER THEN
+            existing_row_count := 0; -- table does not exist yet, safe to proceed
+        END;
+
+        IF (existing_row_count > 0 AND NOT allow_overwrite) THEN
+            IF (brownfield_mode) THEN
+                -- Brownfield: skip existing table, mark as EXISTING (not a failure)
+                UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
+                SET silver_table  = :target_table_name,
+                    silver_schema = :output_schema,
+                    silver_status = 'EXISTING',
+                    updated_at    = CURRENT_TIMESTAMP()
+                WHERE bronze_table = SPLIT_PART(:cur_source_table, '.', -1);
+
+                INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                SELECT :execution_id, 'EXECUTOR', 'SKIPPED',
+                       :target_fqn || ' skipped — brownfield_mode=TRUE, table exists with ' ||
+                       :existing_row_count::VARCHAR || ' rows. Registered as EXISTING.';
+                execution_results := ARRAY_APPEND(execution_results, OBJECT_CONSTRUCT(
+                    'table',         :cur_source_table,
+                    'target',        :target_fqn,
+                    'success',       TRUE,
+                    'skipped',       TRUE,
+                    'reason',        'BROWNFIELD_EXISTING',
+                    'existing_rows', :existing_row_count
+                ));
+            ELSE
+                fail_count := fail_count + 1;
+                INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                SELECT :execution_id, 'EXECUTOR', 'ABORTED',
+                       :target_fqn || ' already exists with ' || :existing_row_count::VARCHAR ||
+                       ' rows. Set overwrite_existing=>TRUE in SET_PIPELINE_CONTEXT to allow overwrite, or use a different output_schema.';
+                execution_results := ARRAY_APPEND(execution_results, OBJECT_CONSTRUCT(
+                    'table',         :cur_source_table,
+                    'target',        :target_fqn,
+                    'success',       FALSE,
+                    'aborted',       TRUE,
+                    'reason',        'TARGET_EXISTS_NO_OVERWRITE',
+                    'existing_rows', :existing_row_count
+                ));
+            END IF;
+            CONTINUE;
+        END IF;
+
+        retry_count         := 0;
+        execution_succeeded := FALSE;
+        last_error          := NULL;
+
+        WHILE (retry_count < max_retries AND NOT execution_succeeded) DO
+            execution_prompt := '
+You are a Snowflake SQL expert. Write a single CREATE OR REPLACE TABLE statement.
+
+SOURCE TABLE: ' || cur_source_table || '
+TRANSFORMATION STRATEGY: ' || cur_strategy || '
+
+AVAILABLE SOURCE COLUMNS (copy these exact names into your SELECT — do not use any other names):
+    ' || REPLACE(col_list, ', ', chr(10) || '    ') || '
+
+YOUR SELECT must only reference these exact column names. Do not reference COLUMN_NAME, COLUMN1, or any placeholder.
+
+PLANNED TRANSFORMATIONS: ' || cur_actions || '
+REASONING: ' || cur_reasoning || '
+
+SCHEMA CONTRACTS:
+' || COALESCE(contracts_context, 'None') || '
+
+DIRECTIVES:
+' || COALESCE(directives_context, 'Apply general hygiene') || '
+
+' || CASE WHEN retry_count > 0
+    THEN 'YOUR PREVIOUS ATTEMPT FAILED: ' || COALESCE(last_error, 'unknown error') ||
+         ' — Check that every column in your SELECT exists in the AVAILABLE SOURCE COLUMNS list above.'
+    ELSE '' END || output_rules;
+
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(:active_model, :execution_prompt) INTO :llm_response;
+
+            BEGIN
+                -- Strip markdown fences (LLMs often wrap output in ```sql ... ``` despite instructions)
+                generated_sql := TRIM(llm_response);
+                generated_sql := REGEXP_REPLACE(generated_sql, '^```(sql)?[\\s\\r\\n]*', '', 1, 1, 'si');
+                generated_sql := REGEXP_REPLACE(generated_sql, '[\\s\\r\\n]*```[\\s\\r\\n]*$', '', 1, 1, 'si');
+                -- Remove any remaining inline backtick fences
+                generated_sql := REGEXP_REPLACE(generated_sql, '```(sql)?', '', 1, 0, 'si');
+                generated_sql := TRIM(generated_sql);
+                -- Strip trailing semicolons (Snowflake EXECUTE IMMEDIATE rejects them)
+                generated_sql := TRIM(SPLIT_PART(generated_sql, ';', 1));
+
+                -- [P0-2] DRY RUN: log DDL without executing
+                IF (is_dry_run) THEN
+                    execution_succeeded := TRUE;
+                    dry_run_count := dry_run_count + 1;
+                    INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                    SELECT :execution_id, 'EXECUTOR', 'DRY_RUN',
+                           '[DRY RUN] ' || :target_fqn ||
+                           ' — DDL generated, NOT executed. Set dry_run=>FALSE to run.' ||
+                           chr(10) || LEFT(:generated_sql, 2000);
+                ELSE
+                    EXECUTE IMMEDIATE :generated_sql;
+                    execution_succeeded := TRUE;
+                    success_count := success_count + 1;
+
+                    UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
+                    SET silver_table      = SPLIT_PART(TRIM(REGEXP_SUBSTR(:generated_sql, 'TABLE\\s+([\\w\\.]+)', 1, 1, 'ie', 1)), '.', -1),
+                        silver_schema     = :output_schema,
+                        silver_status     = 'COMPLETE',
+                        last_execution_id = :execution_id,
+                        last_refreshed_at = CURRENT_TIMESTAMP(),
+                        updated_at        = CURRENT_TIMESTAMP()
+                    WHERE bronze_table = SPLIT_PART(:cur_source_table, '.', -1);
+
+                    INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                    SELECT :execution_id, 'EXECUTOR', 'OK',
+                           SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :target_fqn ||
+                           ' built as ' || :pipeline_type ||
+                           ' (retries=' || :retry_count::VARCHAR || ')';
+                END IF;
+
+            EXCEPTION WHEN OTHER THEN
+                last_error  := SQLERRM;
+                retry_count := retry_count + 1;
+                INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                SELECT :execution_id, 'EXECUTOR', 'RETRY',
+                       SPLIT_PART(:cur_source_table, '.', -1) || ' attempt ' || :retry_count::VARCHAR ||
+                       ' failed: ' || LEFT(:last_error, 300);
+            END;
+        END WHILE;
+
+        IF (NOT execution_succeeded) THEN
+            fail_count := fail_count + 1;
+            INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+            SELECT :execution_id, 'EXECUTOR', 'FAILED',
+                   SPLIT_PART(:cur_source_table, '.', -1) || ' FAILED after ' ||
+                   :max_retries::VARCHAR || ' retries. Last error: ' || LEFT(COALESCE(:last_error, 'unknown'), 400);
+        END IF;
+
+        execution_results := ARRAY_APPEND(execution_results, OBJECT_CONSTRUCT(
+            'table',         cur_source_table,
+            'target',        target_fqn,
+            'pipeline_type', pipeline_type,
+            'success',       execution_succeeded,
+            'dry_run',       is_dry_run,
+            'retries',       retry_count,
+            'error',         LEFT(COALESCE(last_error, ''), 500)
+        ));
+    END FOR;
+
+    UPDATE AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS
+    SET executor_output = OBJECT_CONSTRUCT(
+            'results',        :execution_results,
+            'success_count',  :success_count,
+            'dry_run_count',  :dry_run_count,
+            'fail_count',     :fail_count,
+            'pipeline_type',  :pipeline_type,
+            'output_schema',  :output_schema,
+            'dry_run',        :is_dry_run,
+            'model_used',     :active_model,
+            'completed_at',   CURRENT_TIMESTAMP()::VARCHAR
+        ),
+        execution_completed_at = CURRENT_TIMESTAMP(),
+        current_phase = 'EXECUTOR_COMPLETE'
+    WHERE execution_id = :execution_id;
+
+    INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+    SELECT :execution_id, 'EXECUTOR', 'COMPLETE',
+           CASE WHEN :is_dry_run
+                THEN '[DRY RUN] Generated DDL for ' || :dry_run_count::VARCHAR ||
+                     ' tables. Nothing written. Set dry_run=>FALSE in SET_PIPELINE_CONTEXT to execute.'
+                ELSE 'Built ' || :success_count::VARCHAR || '/' ||
+                     (:success_count + :fail_count)::VARCHAR ||
+                     ' tables in ' || :output_schema || ' as ' || :pipeline_type ||
+                     '. Failures: ' || :fail_count::VARCHAR
+           END;
+
+    RETURN OBJECT_CONSTRUCT(
+        'execution_id',  execution_id,
+        'status',        IFF(is_dry_run, 'DRY_RUN_COMPLETE', IFF(fail_count = 0, 'EXECUTED', 'PARTIAL')),
+        'success_count', success_count,
+        'dry_run_count', dry_run_count,
+        'fail_count',    fail_count,
+        'pipeline_type', pipeline_type,
+        'output_schema', output_schema,
+        'dry_run',       is_dry_run,
+        'model_used',    active_model,
+        'next_phase',    'VALIDATOR'
+    );
+
+EXCEPTION WHEN OTHER THEN
+    LET executor_error VARCHAR := SQLERRM;
+    INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+    SELECT :execution_id, 'EXECUTOR', 'FATAL',
+           'Unhandled exception after ' || :success_count::VARCHAR || ' successes: ' || LEFT(:executor_error, 400);
+    UPDATE AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS
+    SET executor_output = OBJECT_CONSTRUCT(
+            'results',        :execution_results,
+            'success_count',  :success_count,
+            'dry_run_count',  :dry_run_count,
+            'fail_count',     :fail_count + 1,
+            'pipeline_type',  :pipeline_type,
+            'output_schema',  :output_schema,
+            'model_used',     :active_model,
+            'error',          LEFT(:executor_error, 500),
+            'completed_at',   CURRENT_TIMESTAMP()::VARCHAR
+        ),
+        execution_completed_at = CURRENT_TIMESTAMP(),
+        current_phase = 'EXECUTOR_ERROR'
+    WHERE execution_id = :execution_id;
+    RETURN OBJECT_CONSTRUCT(
+        'execution_id',  execution_id,
+        'status',        'ERROR',
+        'error',         LEFT(executor_error, 500),
+        'success_count', success_count,
+        'dry_run_count', dry_run_count,
+        'fail_count',    fail_count + 1,
+        'output_schema', output_schema,
+        'dry_run',       is_dry_run
+    );
+END;
+$$;

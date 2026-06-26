@@ -1,0 +1,185 @@
+{
+  "title": "Agentic Transformation — Observability",
+  "widgets": {
+    "kpi-runs": {
+      "id": "kpi-runs",
+      "type": "scorecard",
+      "title": "Total Workflow Runs",
+      "source": {
+        "sql": "SELECT COUNT(*) AS TOTAL_RUNS FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS"
+      },
+      "valueColumn": "TOTAL_RUNS"
+    },
+    "kpi-silver": {
+      "id": "kpi-silver",
+      "type": "scorecard",
+      "title": "Silver Tables",
+      "source": {
+        "sql": "SELECT COUNT(*) AS SILVER_COMPLETE FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.TABLE_LINEAGE_MAP WHERE silver_status = 'COMPLETE'"
+      },
+      "valueColumn": "SILVER_COMPLETE",
+      "note": "of 4 total"
+    },
+    "kpi-gold": {
+      "id": "kpi-gold",
+      "type": "scorecard",
+      "title": "Gold Tables",
+      "source": {
+        "sql": "SELECT COUNT(*) AS GOLD_COMPLETE FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.TABLE_LINEAGE_MAP WHERE gold_status = 'COMPLETE'"
+      },
+      "valueColumn": "GOLD_COMPLETE",
+      "note": "of 4 total"
+    },
+    "kpi-learnings": {
+      "id": "kpi-learnings",
+      "type": "scorecard",
+      "title": "Active Learnings",
+      "source": {
+        "sql": "SELECT COUNT(*) AS ACTIVE_LEARNINGS FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_LEARNINGS WHERE is_active = TRUE"
+      },
+      "valueColumn": "ACTIVE_LEARNINGS",
+      "note": "accumulated across all runs"
+    },
+    "executor-perf": {
+      "id": "executor-perf",
+      "type": "chart",
+      "title": "Executor Results per Run",
+      "source": {
+        "sql": "SELECT workflow_name AS RUN_NAME, COALESCE(executor_output:success_count::INT, 0) AS SUCCEEDED, COALESCE(executor_output:fail_count::INT, 0) AS FAILED FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS ORDER BY started_at"
+      },
+      "vega": {
+        "mark": "bar",
+        "encoding": {
+          "x": { "field": "RUN_NAME", "type": "nominal", "title": "Workflow Run" },
+          "y": { "field": "SUCCEEDED", "type": "quantitative", "title": "Tables" },
+          "color": { "field": "RUN_NAME", "type": "nominal" },
+          "tooltip": [
+            { "field": "RUN_NAME", "type": "nominal" },
+            { "field": "SUCCEEDED", "type": "quantitative" },
+            { "field": "FAILED", "type": "quantitative" }
+          ]
+        }
+      }
+    },
+    "learning-types": {
+      "id": "learning-types",
+      "type": "chart",
+      "title": "Learning Types Breakdown",
+      "source": {
+        "sql": "SELECT learning_type AS LEARNING_TYPE, COUNT(*) AS COUNT FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_LEARNINGS WHERE is_active = TRUE GROUP BY 1"
+      },
+      "vega": {
+        "mark": "arc",
+        "encoding": {
+          "theta": { "field": "COUNT", "type": "quantitative" },
+          "color": { "field": "LEARNING_TYPE", "type": "nominal", "title": "Type" },
+          "tooltip": [
+            { "field": "LEARNING_TYPE", "type": "nominal" },
+            { "field": "COUNT", "type": "quantitative" }
+          ]
+        }
+      }
+    },
+    "confidence-dist": {
+      "id": "confidence-dist",
+      "type": "chart",
+      "title": "Confidence Distribution",
+      "source": {
+        "sql": "SELECT CASE WHEN confidence_score >= 0.9 THEN 'High (≥0.9)' WHEN confidence_score >= 0.7 THEN 'Med (0.7-0.9)' ELSE 'Low (<0.7)' END AS BAND, COUNT(*) AS LEARNINGS FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_LEARNINGS WHERE is_active = TRUE GROUP BY 1 ORDER BY MIN(confidence_score) DESC"
+      },
+      "vega": {
+        "mark": "bar",
+        "encoding": {
+          "x": { "field": "BAND", "type": "nominal", "title": "Confidence Band", "sort": ["-x"] },
+          "y": { "field": "LEARNINGS", "type": "quantitative" },
+          "color": { "field": "BAND", "type": "nominal" },
+          "tooltip": [
+            { "field": "BAND", "type": "nominal" },
+            { "field": "LEARNINGS", "type": "quantitative" }
+          ]
+        }
+      }
+    },
+    "coverage-status": {
+      "id": "coverage-status",
+      "type": "chart",
+      "title": "Medallion Coverage",
+      "source": {
+        "sql": "SELECT CASE WHEN gold_status = 'COMPLETE' THEN 'Bronze+Silver+Gold' WHEN silver_status = 'COMPLETE' THEN 'Bronze+Silver' ELSE 'Bronze Only' END AS COVERAGE_LEVEL, COUNT(*) AS TABLES FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.TABLE_LINEAGE_MAP GROUP BY 1"
+      },
+      "vega": {
+        "mark": "bar",
+        "encoding": {
+          "x": { "field": "TABLES", "type": "quantitative", "title": "Tables" },
+          "y": { "field": "COVERAGE_LEVEL", "type": "nominal", "title": "Coverage", "sort": "-x" },
+          "color": { "field": "COVERAGE_LEVEL", "type": "nominal" },
+          "tooltip": [
+            { "field": "COVERAGE_LEVEL", "type": "nominal" },
+            { "field": "TABLES", "type": "quantitative" }
+          ]
+        }
+      }
+    },
+    "learnings-per-run": {
+      "id": "learnings-per-run",
+      "type": "chart",
+      "title": "Learnings Generated per Run",
+      "source": {
+        "sql": "SELECT e.workflow_name AS RUN_NAME, COUNT(l.learning_id) AS LEARNINGS_GENERATED FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS e LEFT JOIN AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_LEARNINGS l ON l.execution_id = e.execution_id GROUP BY e.workflow_name, e.started_at ORDER BY e.started_at"
+      },
+      "vega": {
+        "mark": "bar",
+        "encoding": {
+          "x": { "field": "RUN_NAME", "type": "nominal", "title": "Run" },
+          "y": { "field": "LEARNINGS_GENERATED", "type": "quantitative", "title": "Learnings" },
+          "color": { "field": "RUN_NAME", "type": "nominal" },
+          "tooltip": [
+            { "field": "RUN_NAME", "type": "nominal" },
+            { "field": "LEARNINGS_GENERATED", "type": "quantitative" }
+          ]
+        }
+      }
+    },
+    "top-learnings": {
+      "id": "top-learnings",
+      "type": "table",
+      "title": "Active Learnings (ranked by confidence)",
+      "source": {
+        "sql": "SELECT learning_type AS TYPE, source_context AS CONTEXT, observation AS OBSERVATION, recommendation AS RECOMMENDATION, ROUND(confidence_score, 2) AS CONFIDENCE, times_observed AS OBSERVED FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_LEARNINGS WHERE is_active = TRUE ORDER BY confidence_score DESC, times_observed DESC"
+      },
+      "columns": ["TYPE", "CONTEXT", "OBSERVATION", "RECOMMENDATION", "CONFIDENCE", "OBSERVED"]
+    },
+    "recent-log": {
+      "id": "recent-log",
+      "type": "table",
+      "title": "Recent Workflow Log",
+      "source": {
+        "sql": "SELECT created_at AS TIMESTAMP, phase AS PHASE, status AS STATUS, message AS MESSAGE FROM AGENTIC_FOUNDRY.AGENT_FRAMEWORK.WORKFLOW_LOG ORDER BY created_at DESC LIMIT 50"
+      },
+      "columns": ["TIMESTAMP", "PHASE", "STATUS", "MESSAGE"]
+    }
+  },
+  "collections": [
+    {
+      "id": "intelligence-loop",
+      "type": "highlight",
+      "label": "Intelligence loop: 10 active learnings, 1 compounded to max confidence",
+      "widgetIds": ["learning-types", "confidence-dist", "learnings-per-run", "top-learnings"]
+    }
+  ],
+  "layout": {
+    "default": [
+      { "i": "kpi-runs",         "x": 0,  "y": 0,  "w": 3, "h": 2 },
+      { "i": "kpi-silver",       "x": 3,  "y": 0,  "w": 3, "h": 2 },
+      { "i": "kpi-gold",         "x": 6,  "y": 0,  "w": 3, "h": 2 },
+      { "i": "kpi-learnings",    "x": 9,  "y": 0,  "w": 3, "h": 2 },
+      { "i": "executor-perf",    "x": 0,  "y": 2,  "w": 8, "h": 4 },
+      { "i": "learning-types",   "x": 8,  "y": 2,  "w": 4, "h": 4 },
+      { "i": "confidence-dist",  "x": 0,  "y": 6,  "w": 4, "h": 4 },
+      { "i": "coverage-status",  "x": 4,  "y": 6,  "w": 4, "h": 4 },
+      { "i": "learnings-per-run","x": 8,  "y": 6,  "w": 4, "h": 4 },
+      { "i": "top-learnings",    "x": 0,  "y": 10, "w": 12, "h": 6 },
+      { "i": "recent-log",       "x": 0,  "y": 16, "w": 12, "h": 5 }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+definition_version: 2
+entities:
+  agentic_transformation_skill_v3:
+    type: streamlit
+    identifier:
+      name: AGENTIC_TRANSFORMATION_SKILL_V3
+      schema: AGENT_FRAMEWORK
+      database: ATS_V3
+    title: "Agentic Transformation Skill v3"
+    query_warehouse: COMPUTE_WH
+    main_file: streamlit_app.py
+    artifacts:
+      - streamlit_app.py
+      - environment.yml

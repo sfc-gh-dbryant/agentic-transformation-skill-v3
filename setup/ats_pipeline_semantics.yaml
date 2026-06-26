@@ -1,0 +1,263 @@
+name: ats_pipeline_semantics
+description: ATS v3 Pipeline Semantic View. Enables natural language queries over
+  the agentic data transformation pipeline state. Covers Bronze to Silver to Gold
+  table coverage, Planner transformation strategy decisions, Reflector learnings,
+  Schema Analyst FK relationships, and workflow execution history.
+tables:
+  - name: TABLE_LINEAGE_MAP
+    base_table:
+      database: ATS_V3
+      schema: AGENT_FRAMEWORK
+      table: TABLE_LINEAGE_MAP
+    primary_key:
+      columns:
+        - LINEAGE_ID
+    dimensions:
+      - name: LINEAGE_ID
+        expr: LINEAGE_ID
+        data_type: VARCHAR
+      - name: BRONZE_TABLE
+        expr: BRONZE_TABLE
+        data_type: VARCHAR
+      - name: BRONZE_SCHEMA
+        expr: BRONZE_SCHEMA
+        data_type: VARCHAR
+      - name: BRONZE_DATABASE
+        expr: BRONZE_DATABASE
+        data_type: VARCHAR
+      - name: SILVER_TABLE
+        expr: SILVER_TABLE
+        data_type: VARCHAR
+      - name: SILVER_SCHEMA
+        expr: SILVER_SCHEMA
+        data_type: VARCHAR
+      - name: GOLD_TABLE
+        expr: GOLD_TABLE
+        data_type: VARCHAR
+      - name: GOLD_SCHEMA
+        expr: GOLD_SCHEMA
+        data_type: VARCHAR
+      - name: LAST_EXECUTION_ID
+        expr: LAST_EXECUTION_ID
+        data_type: VARCHAR
+      - name: SILVER_STATUS
+        expr: SILVER_STATUS
+        data_type: VARCHAR
+      - name: GOLD_STATUS
+        expr: GOLD_STATUS
+        data_type: VARCHAR
+      - name: ROW_COUNT_BRONZE
+        expr: ROW_COUNT_BRONZE
+        data_type: NUMBER
+      - name: ROW_COUNT_SILVER
+        expr: ROW_COUNT_SILVER
+        data_type: NUMBER
+      - name: ROW_COUNT_GOLD
+        expr: ROW_COUNT_GOLD
+        data_type: NUMBER
+      - name: DISCOVERY_METHOD
+        expr: DISCOVERY_METHOD
+        data_type: VARCHAR
+    time_dimensions:
+      - name: LAST_REFRESHED_AT
+        expr: LAST_REFRESHED_AT
+        data_type: TIMESTAMP_NTZ
+      - name: CREATED_AT
+        expr: CREATED_AT
+        data_type: TIMESTAMP_NTZ
+      - name: UPDATED_AT
+        expr: UPDATED_AT
+        data_type: TIMESTAMP_NTZ
+    unique_keys:
+      - columns:
+          - BRONZE_TABLE
+          - BRONZE_SCHEMA
+          - BRONZE_DATABASE
+  - name: PLANNER_DECISIONS
+    base_table:
+      database: ATS_V3
+      schema: AGENT_FRAMEWORK
+      table: PLANNER_DECISIONS
+    primary_key:
+      columns:
+        - DECISION_ID
+        - EXECUTION_ID
+    dimensions:
+      - name: DECISION_ID
+        expr: DECISION_ID
+        data_type: VARCHAR
+      - name: EXECUTION_ID
+        expr: EXECUTION_ID
+        data_type: VARCHAR
+      - name: SOURCE_TABLE
+        expr: SOURCE_TABLE
+        data_type: VARCHAR
+      - name: TARGET_SCHEMA
+        expr: TARGET_SCHEMA
+        data_type: VARCHAR
+      - name: TRANSFORMATION_STRATEGY
+        expr: TRANSFORMATION_STRATEGY
+        data_type: VARCHAR
+      - name: PRIORITY
+        expr: PRIORITY
+        data_type: NUMBER
+      - name: MODEL_USED
+        expr: MODEL_USED
+        data_type: VARCHAR
+      - name: PK_COLUMNS
+        expr: PK_COLUMNS
+        data_type: VARCHAR
+    time_dimensions:
+      - name: CREATED_AT
+        expr: CREATED_AT
+        data_type: TIMESTAMP_NTZ
+    facts:
+      - name: CONFIDENCE_SCORE
+        expr: CONFIDENCE_SCORE
+        data_type: FLOAT
+  - name: WORKFLOW_LEARNINGS
+    base_table:
+      database: ATS_V3
+      schema: AGENT_FRAMEWORK
+      table: WORKFLOW_LEARNINGS
+    primary_key:
+      columns:
+        - LEARNING_ID
+    dimensions:
+      - name: LEARNING_ID
+        expr: LEARNING_ID
+        data_type: VARCHAR
+      - name: EXECUTION_ID
+        expr: EXECUTION_ID
+        data_type: VARCHAR
+      - name: LEARNING_TYPE
+        expr: LEARNING_TYPE
+        data_type: VARCHAR
+      - name: SOURCE_CONTEXT
+        expr: SOURCE_CONTEXT
+        data_type: VARCHAR
+      - name: OBSERVATION
+        expr: OBSERVATION
+        data_type: VARCHAR
+      - name: RECOMMENDATION
+        expr: RECOMMENDATION
+        data_type: VARCHAR
+      - name: TIMES_OBSERVED
+        expr: TIMES_OBSERVED
+        data_type: NUMBER
+      - name: IS_ACTIVE
+        expr: IS_ACTIVE
+        data_type: BOOLEAN
+    facts:
+      - name: CONFIDENCE_SCORE
+        expr: CONFIDENCE_SCORE
+        data_type: FLOAT
+  - name: WORKFLOW_EXECUTIONS
+    base_table:
+      database: ATS_V3
+      schema: AGENT_FRAMEWORK
+      table: WORKFLOW_EXECUTIONS
+    primary_key:
+      columns:
+        - EXECUTION_ID
+    dimensions:
+      - name: EXECUTION_ID
+        expr: EXECUTION_ID
+        data_type: VARCHAR
+      - name: WORKFLOW_NAME
+        expr: WORKFLOW_NAME
+        data_type: VARCHAR
+      - name: STATUS
+        expr: STATUS
+        data_type: VARCHAR
+      - name: CURRENT_PHASE
+        expr: CURRENT_PHASE
+        data_type: VARCHAR
+      - name: RETRY_COUNT
+        expr: RETRY_COUNT
+        data_type: NUMBER
+    time_dimensions:
+      - name: STARTED_AT
+        expr: STARTED_AT
+        data_type: TIMESTAMP_NTZ
+      - name: COMPLETED_AT
+        expr: COMPLETED_AT
+        data_type: TIMESTAMP_NTZ
+  - name: SCHEMA_RELATIONSHIPS
+    base_table:
+      database: ATS_V3
+      schema: AGENT_FRAMEWORK
+      table: SCHEMA_RELATIONSHIPS
+    primary_key:
+      columns:
+        - RELATIONSHIP_ID
+    dimensions:
+      - name: RELATIONSHIP_ID
+        expr: RELATIONSHIP_ID
+        data_type: VARCHAR
+      - name: EXECUTION_ID
+        expr: EXECUTION_ID
+        data_type: VARCHAR
+      - name: SOURCE_TABLE
+        expr: SOURCE_TABLE
+        data_type: VARCHAR
+      - name: SOURCE_COLUMN
+        expr: SOURCE_COLUMN
+        data_type: VARCHAR
+      - name: TARGET_TABLE
+        expr: TARGET_TABLE
+        data_type: VARCHAR
+      - name: TARGET_COLUMN
+        expr: TARGET_COLUMN
+        data_type: VARCHAR
+      - name: RELATIONSHIP_TYPE
+        expr: RELATIONSHIP_TYPE
+        data_type: VARCHAR
+    time_dimensions:
+      - name: CREATED_AT
+        expr: CREATED_AT
+        data_type: TIMESTAMP_NTZ
+    facts:
+      - name: CONFIDENCE
+        expr: CONFIDENCE
+        data_type: FLOAT
+verified_queries:
+  - name: 0;1
+    question: What is the pipeline coverage status for each table?
+    sql: SELECT BRONZE_TABLE, SILVER_TABLE, SILVER_STATUS, GOLD_TABLE, GOLD_STATUS,
+      ROW_COUNT_BRONZE, ROW_COUNT_SILVER, ROW_COUNT_GOLD FROM table_lineage_map ORDER
+      BY BRONZE_TABLE
+    verified_at: 1781813022
+    verified_by: Semantic Model Generator
+  - name: 1;1
+    question: What percentage of tables have completed Silver transformation?
+    sql: SELECT COUNT(DISTINCT BRONZE_TABLE) AS total_tables, COUNT_IF(SILVER_STATUS
+      = 'COMPLETE') AS silver_complete, ROUND(COUNT_IF(SILVER_STATUS = 'COMPLETE')
+      * 100.0 / NULLIF(COUNT(*), 0), 1) AS silver_pct FROM table_lineage_map
+    verified_at: 1781813022
+    verified_by: Semantic Model Generator
+  - name: 2;1
+    question: What transformation strategy did the Planner choose for each table,
+      ordered by confidence level?
+    sql: SELECT SOURCE_TABLE, TRANSFORMATION_STRATEGY, CONFIDENCE_SCORE, PK_COLUMNS
+      FROM planner_decisions ORDER BY CONFIDENCE_SCORE DESC
+    verified_at: 1781813022
+    verified_by: Semantic Model Generator
+  - name: 3;1
+    question: What are the top active Reflector learnings?
+    sql: SELECT LEARNING_TYPE, SOURCE_CONTEXT, OBSERVATION, RECOMMENDATION, CONFIDENCE_SCORE,
+      TIMES_OBSERVED FROM workflow_learnings WHERE IS_ACTIVE = TRUE ORDER BY CONFIDENCE_SCORE
+      DESC
+    verified_at: 1781813022
+    verified_by: Semantic Model Generator
+  - name: 4;1
+    question: Which high-confidence foreign key relationships were discovered?
+    sql: SELECT SOURCE_TABLE, SOURCE_COLUMN, TARGET_TABLE, RELATIONSHIP_TYPE, CONFIDENCE
+      FROM schema_relationships WHERE CONFIDENCE >= 0.7 ORDER BY CONFIDENCE DESC
+    verified_at: 1781813022
+    verified_by: Semantic Model Generator
+  - name: 5;1
+    question: What is the distribution of workflow runs by their completion status?
+    sql: SELECT STATUS, COUNT(*) AS run_count FROM workflow_executions GROUP BY STATUS
+    verified_at: 1781813022
+    verified_by: Semantic Model Generator

@@ -1,0 +1,8 @@
+name: agentic_transformation_skill
+channels:
+  - snowflake
+  - nodefaults
+dependencies:
+  - pandas
+  - streamlit=1.51.0
+  - snowflake-snowpark-python
