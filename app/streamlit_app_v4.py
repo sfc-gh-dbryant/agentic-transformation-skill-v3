@@ -2449,14 +2449,21 @@ _V4_AGENTS = [
 _V4_AGENT_LABELS = {a["name"]: f"{a['icon']} {a['label']}" for a in _V4_AGENTS}
 
 
+_V4_AGENT_INSTRUCTIONS = {
+    "ATS_SCHEMA_ANALYST_AGENT": "You are the Schema Analyst for the Agentic Transformation Skill. Discover foreign-key and entity-reference relationships across Bronze tables. For a given question, reason about table schemas and relationships based on column names and data types. Be concise and structured.",
+    "ATS_PLANNER_AGENT": "You are the Planner for the Agentic Transformation Skill. For each Bronze table, decide the transformation strategy (direct_select, deduplicate, flatten_and_type, pivot, union, composite_key_dedup) and identify primary key columns for the Silver layer. Be precise and structured.",
+    "ATS_EXECUTOR_AGENT": "You are the Executor for the Agentic Transformation Skill. Generate Silver-layer DDL using only real column names from the source table. Never invent column names. Return valid Snowflake SQL CREATE TABLE AS SELECT statements.",
+    "ATS_VALIDATOR_AGENT": "You are the Validator for the Agentic Transformation Skill. Validate Silver tables against Bronze sources: row count parity, PK uniqueness, NULL checks. Report PASS, WARN, or FAIL with specific reasons.",
+    "ATS_REFLECTOR_AGENT": "You are the Reflector for the Agentic Transformation Skill. Extract learnings from pipeline runs to improve future executions. Focus on actionable patterns: column naming issues, dedup strategies, constraint violations, data quality observations.",
+    "ATS_ORCHESTRATOR_AGENT": "You are the Orchestrator for the Agentic Transformation Skill v4. Coordinate the five pipeline phases: Schema Analyst → Planner → Executor → Validator → Reflector. Report status clearly.",
+}
+
+
 def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> str:
     """
-    Call a Cortex Agent via the REST API.
-
-    In Streamlit-in-Snowflake, session tokens are not accessible through the
-    connection object. Use _snowflake.send_snow_api_request() which handles
-    authentication internally, falling back to requests + explicit token for
-    external / local development contexts.
+    Call a Cortex Agent via the REST API (SiS path: _snowflake.send_snow_api_request).
+    Falls back to SNOWFLAKE.CORTEX.COMPLETE if the Agents endpoint returns 399504
+    (feature not enabled on this account) or on any other failure.
     """
     import json as _json
 
@@ -2468,6 +2475,7 @@ def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> s
     payload = {"model": agent_id, "messages": messages}
 
     # ── Path 1: SiS internal authenticated caller ─────────────────────────────
+    agent_error = None
     try:
         import _snowflake
         resp = _snowflake.send_snow_api_request(
@@ -2486,55 +2494,82 @@ def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> s
                 body = _json.loads(body)
             except Exception:
                 pass
-        if status == 200:
-            choices = body.get("choices", []) if isinstance(body, dict) else []
+
+        # Check for SSE events array (streaming response)
+        if isinstance(body, list):
+            for event in body:
+                if isinstance(event, dict):
+                    if event.get("event") == "error":
+                        err_code = str(event.get("data", {}).get("code", ""))
+                        agent_error = event.get("data", {}).get("message", str(body))
+                        if "399504" in err_code or "not authorized" in agent_error.lower():
+                            break  # Fall through to COMPLETE fallback
+                    elif event.get("event") == "message.delta":
+                        delta = event.get("data", {}).get("delta", {})
+                        content = delta.get("content", [])
+                        texts = [c["text"] for c in content if c.get("type") == "text"]
+                        if texts:
+                            return "\n".join(texts)
+        elif status == 200 and isinstance(body, dict):
+            choices = body.get("choices", [])
             if choices:
                 content = choices[0].get("message", {}).get("content", [])
                 texts   = [c["text"] for c in content if c.get("type") == "text"]
                 return "\n".join(texts) or str(body)
-            return str(body)
-        return f"Agent error {status}: {body}"
+        elif status != 200:
+            agent_error = str(body)
+
     except ImportError:
-        pass  # Not in SiS — fall through to requests approach
+        agent_error = "Not in SiS context"
     except Exception as e:
-        return f"Agent call failed: {e}"
+        agent_error = str(e)
 
     # ── Path 2: External / local dev — requests + explicit token ──────────────
-    import requests as _req
-    try:
-        conn  = session.connection
-        host  = conn.host
-        token = conn.rest.token
-    except Exception as e:
-        return f"Session error: {e}"
+    if not agent_error or "399504" not in str(agent_error):
+        import requests as _req
+        try:
+            conn  = session.connection
+            host  = conn.host
+            token = conn.rest.token
+            resp = _req.post(
+                f"https://{host}/api/v2/cortex/agent:run",
+                headers={"Authorization": f'Snowflake Token="{token}"',
+                         "Content-Type": "application/json", "Accept": "application/json"},
+                json=payload, timeout=120,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                choices = data.get("choices", [])
+                if choices:
+                    content = choices[0].get("message", {}).get("content", [])
+                    texts = [c["text"] for c in content if c.get("type") == "text"]
+                    return "\n".join(texts) or str(data)
+            agent_error = f"{resp.status_code}: {resp.text[:200]}"
+        except Exception:
+            pass
 
-    try:
-        resp = _req.post(
-            f"https://{host}/api/v2/cortex/agent:run",
-            headers={
-                "Authorization": f'Snowflake Token="{token}"',
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            json=payload,
-            timeout=120,
-        )
-    except Exception as e:
-        return f"Request failed: {e}"
+    # ── Path 3: CORTEX.COMPLETE fallback (when Agents endpoint not enabled) ───
+    sys_prompt = _V4_AGENT_INSTRUCTIONS.get(agent_name,
+        "You are an AI assistant for data transformation pipelines.")
 
-    if resp.status_code != 200:
-        return f"Agent error {resp.status_code}: {resp.text[:400]}"
+    history_text = ""
+    if history:
+        for m in history[-4:]:
+            role = m.get("role", "user")
+            parts = m.get("content", [])
+            text  = parts[0].get("text", "") if isinstance(parts, list) else str(parts)
+            history_text += f"\n{role.upper()}: {text}"
 
+    prompt = f"{sys_prompt}\n{history_text}\nUSER: {message}\nASSISTANT:"
+    safe = prompt.replace("'", "''")
     try:
-        data    = resp.json()
-        choices = data.get("choices", [])
-        if not choices:
-            return f"No choices in response: {data}"
-        content = choices[0].get("message", {}).get("content", [])
-        texts   = [c["text"] for c in content if c.get("type") == "text"]
-        return "\n".join(texts) or str(data)
+        rows = session.sql(
+            f"SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.3-70b', '{safe}')"
+        ).collect()
+        reply = str(rows[0][0]) if rows else "No response."
+        return f"*(via CORTEX.COMPLETE — Agents endpoint not enabled on this account)*\n\n{reply}"
     except Exception as e:
-        return f"Parse error: {e} — raw: {resp.text[:200]}"
+        return f"All paths failed. Last agent error: {agent_error}\nCOMPLETE error: {e}"
 
 
 def render_agent_hub_tab():
