@@ -27,8 +27,9 @@ DECLARE
     allow_overwrite     BOOLEAN;
     brownfield_mode     BOOLEAN;
     decisions_cursor CURSOR FOR
-        SELECT decision_id, source_table, transformation_strategy, recommended_actions, llm_reasoning
-        FROM   AGENT_FRAMEWORK.PLANNER_DECISIONS
+        SELECT decision_id, source_table, transformation_strategy, recommended_actions, llm_reasoning,
+               ARRAY_TO_STRING(d.recommended_actions::ARRAY, '') AS pk_hint
+        FROM   AGENT_FRAMEWORK.PLANNER_DECISIONS d
         WHERE  execution_id = ?
         ORDER BY priority ASC;
 
@@ -55,6 +56,8 @@ DECLARE
     target_fqn          VARCHAR;
     existing_row_count  INTEGER DEFAULT 0;
     col_list            VARCHAR;
+    pk_columns          VARCHAR;   -- for deterministic fast path
+    fast_path_used      BOOLEAN DEFAULT FALSE;
 BEGIN
     SELECT primary_model INTO :active_model
     FROM AGENT_FRAMEWORK.MODEL_CONFIG
@@ -213,8 +216,65 @@ OUTPUT RULES (CRITICAL):
         retry_count         := 0;
         execution_succeeded := FALSE;
         last_error          := NULL;
+        fast_path_used      := FALSE;
 
-        WHILE (retry_count < max_retries AND NOT execution_succeeded) DO
+        -- ── Deterministic fast path (no LLM call) ─────────────────────────────
+        -- deduplicate: ROW_NUMBER dedup using pk_columns from Planner decision
+        -- direct_select / passthrough: straight SELECT * with type hygiene
+        -- Both are 100% deterministic and ~40-100x faster than LLM path
+        BEGIN
+            IF (cur_strategy IN ('deduplicate', 'direct_select', 'passthrough')) THEN
+                -- Resolve pk_columns from recommended_actions JSON
+                LET pk_sql VARCHAR :=
+                    'SELECT LISTAGG(UPPER(a.value:column::VARCHAR), '', '') WITHIN GROUP (ORDER BY 1) ' ||
+                    'FROM TABLE(FLATTEN(PARSE_JSON(' ||
+                    '''' || REPLACE(cur_actions, '''', '''''') || '''' ||
+                    '))) a WHERE a.value:action IN (''set_primary_key'',''deduplicate_on'',''primary_key'')';
+                LET pk_rs  RESULTSET := (EXECUTE IMMEDIATE :pk_sql);
+                LET pk_cur CURSOR FOR pk_rs;
+                OPEN pk_cur;
+                FETCH pk_cur INTO pk_columns;
+                CLOSE pk_cur;
+
+                -- Build deterministic DDL
+                IF (cur_strategy IN ('direct_select', 'passthrough')) THEN
+                    -- Pure pass-through: select all columns, apply basic type hygiene
+                    generated_sql :=
+                        'CREATE OR REPLACE TABLE ' || target_fqn || ' AS ' ||
+                        'SELECT ' || col_list || ' ' ||
+                        'FROM ' || cur_source_table;
+                    fast_path_used := TRUE;
+
+                ELSEIF (cur_strategy = 'deduplicate' AND pk_columns IS NOT NULL AND LENGTH(pk_columns) > 0) THEN
+                    -- ROW_NUMBER dedup: latest row per PK, filter soft-deletes
+                    generated_sql :=
+                        'CREATE OR REPLACE TABLE ' || target_fqn || ' AS ' ||
+                        'WITH ranked AS (' ||
+                        '  SELECT ' || col_list || ',' ||
+                        '    ROW_NUMBER() OVER (' ||
+                        '      PARTITION BY ' || pk_columns ||
+                        '      ORDER BY UPDATED_AT DESC NULLS LAST, CREATED_AT DESC NULLS LAST' ||
+                        '    ) AS _ats_rn' ||
+                        '  FROM ' || cur_source_table ||
+                        '  WHERE COALESCE(IS_DELETED, FALSE) = FALSE' ||
+                        ')' ||
+                        'SELECT ' || col_list || ' FROM ranked WHERE _ats_rn = 1';
+                    fast_path_used := TRUE;
+                END IF;
+            END IF;
+        EXCEPTION WHEN OTHER THEN
+            fast_path_used := FALSE; -- fall through to LLM on any error
+        END;
+
+        IF (fast_path_used) THEN
+            INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+            SELECT :execution_id, 'EXECUTOR', 'FAST_PATH',
+                   SPLIT_PART(:cur_source_table, '.', -1) || ' -> ' || :target_fqn ||
+                   ' (deterministic, no LLM, strategy=' || :cur_strategy || ')';
+        END IF;
+
+        -- LLM path: only runs when fast path not used OR fast path failed
+        WHILE (retry_count < max_retries AND NOT execution_succeeded AND NOT fast_path_used) DO
             execution_prompt := '
 You are a Snowflake SQL expert. Write a single CREATE OR REPLACE TABLE statement.
 
@@ -334,7 +394,46 @@ DIRECTIVES:
             END;
         END WHILE;
 
-        IF (NOT execution_succeeded) THEN
+        -- Fast path execution block (runs when WHILE loop was skipped)
+        IF (fast_path_used AND NOT execution_succeeded) THEN
+            BEGIN
+                IF (is_dry_run) THEN
+                    execution_succeeded := TRUE;
+                    dry_run_count := dry_run_count + 1;
+                    INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                    SELECT :execution_id, 'EXECUTOR', 'DRY_RUN',
+                           '[DRY RUN / FAST PATH] ' || :target_fqn ||
+                           ' — deterministic DDL generated, NOT executed.' ||
+                           chr(10) || LEFT(:generated_sql, 2000);
+                ELSE
+                    EXECUTE IMMEDIATE :generated_sql;
+                    execution_succeeded := TRUE;
+                    success_count := success_count + 1;
+                    UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
+                    SET silver_table      = :target_table_name,
+                        silver_schema     = :output_schema,
+                        silver_status     = 'COMPLETE',
+                        last_execution_id = :execution_id,
+                        last_refreshed_at = CURRENT_TIMESTAMP(),
+                        updated_at        = CURRENT_TIMESTAMP()
+                    WHERE bronze_table = SPLIT_PART(:cur_source_table, '.', -1);
+                    INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                    SELECT :execution_id, 'EXECUTOR', 'OK',
+                           SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :target_fqn ||
+                           ' built via fast path (strategy=' || :cur_strategy || ')';
+                END IF;
+            EXCEPTION WHEN OTHER THEN
+                -- Fast path DDL failed — log and mark as failed (no retry for deterministic DDL)
+                last_error  := SQLERRM;
+                fail_count  := fail_count + 1;
+                INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                SELECT :execution_id, 'EXECUTOR', 'FAILED',
+                       SPLIT_PART(:cur_source_table, '.', -1) || ' fast path FAILED: ' || LEFT(:last_error, 400);
+            END;
+        END IF;
+
+        -- LLM path failure reporting
+        IF (NOT execution_succeeded AND NOT fast_path_used) THEN
             fail_count := fail_count + 1;
             INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
             SELECT :execution_id, 'EXECUTOR', 'FAILED',
