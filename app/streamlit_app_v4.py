@@ -2504,6 +2504,7 @@ def render_agent_hub_tab():
 
     try:
         agents_df = session.sql("SHOW AGENTS IN SCHEMA AGENT_FRAMEWORK").to_pandas()
+        agents_df.columns = [c.lower() for c in agents_df.columns]
         live_names = set(agents_df["name"].str.upper().tolist())
     except Exception:
         live_names = set()
