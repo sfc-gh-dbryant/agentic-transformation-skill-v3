@@ -7,8 +7,10 @@
 
 USE DATABASE IDENTIFIER($TARGET_DB);
 
+SET SV_SCHEMA = $TARGET_DB || '.AGENT_FRAMEWORK';
+
 CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
-    $TARGET_DB || ''.AGENT_FRAMEWORK'',
+    $SV_SCHEMA,
     $$
 name: ats_pipeline_semantics
 description: ATS v3 Pipeline Semantic View. Enables natural language queries over
