@@ -21,6 +21,8 @@ entities:
     title: "Agentic Transformation Skill v4"
     query_warehouse: COMPUTE_WH
     main_file: streamlit_app_v4.py
+    runtime_name: SYSTEM$ST_CONTAINER_RUNTIME_PY3_11
+    compute_pool: ATS_STREAMLIT_POOL
     artifacts:
       - streamlit_app_v4.py
-      - environment.yml
+      - requirements.txt

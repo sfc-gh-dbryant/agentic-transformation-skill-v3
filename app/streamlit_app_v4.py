@@ -2461,11 +2461,15 @@ _V4_AGENT_INSTRUCTIONS = {
 
 def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> str:
     """
-    Call a Cortex Agent via the REST API (SiS path: _snowflake.send_snow_api_request).
-    Falls back to SNOWFLAKE.CORTEX.COMPLETE if the Agents endpoint returns 399504
-    (feature not enabled on this account) or on any other failure.
+    Call a Cortex Agent via the REST API.
+
+    Priority order:
+      1. Container runtime: session.connection.rest.token works, use requests directly
+      2. Warehouse runtime SiS: _snowflake.send_snow_api_request (blocked by Snowflake — see docs)
+      3. CORTEX.COMPLETE fallback with agent system instructions
     """
     import json as _json
+    import requests as _req
 
     db = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
     agent_id = f"{db}.AGENT_FRAMEWORK.{agent_name}"
@@ -2474,102 +2478,88 @@ def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> s
     ]
     payload = {"model": agent_id, "messages": messages}
 
-    # ── Path 1: SiS internal authenticated caller ─────────────────────────────
-    agent_error = None
+    def _parse_agent_response(data) -> str | None:
+        if isinstance(data, list):
+            for event in data:
+                if not isinstance(event, dict):
+                    continue
+                if event.get("event") == "error":
+                    return None
+                if event.get("event") == "message.delta":
+                    content = event.get("data", {}).get("delta", {}).get("content", [])
+                    texts = [c["text"] for c in content if c.get("type") == "text"]
+                    if texts:
+                        return "\n".join(texts)
+        if isinstance(data, dict):
+            choices = data.get("choices", [])
+            if choices:
+                content = choices[0].get("message", {}).get("content", [])
+                texts = [c["text"] for c in content if c.get("type") == "text"]
+                return "\n".join(texts) if texts else None
+        return None
+
+    # ── Path 1: Container runtime — full REST with session token ──────────────
+    try:
+        conn  = session.connection
+        host  = conn.host
+        token = conn.rest.token  # Works in container runtime, not warehouse runtime
+        resp  = _req.post(
+            f"https://{host}/api/v2/cortex/agent:run",
+            headers={"Authorization": f'Snowflake Token="{token}"',
+                     "Content-Type": "application/json", "Accept": "application/json"},
+            json=payload, timeout=120,
+        )
+        if resp.status_code == 200:
+            body = resp.json()
+            result = _parse_agent_response(body)
+            if result:
+                return result
+        agent_error = f"{resp.status_code}: {resp.text[:200]}"
+    except Exception as e:
+        agent_error = str(e)
+
+    # ── Path 2: Warehouse runtime SiS — _snowflake internal caller ────────────
     try:
         import _snowflake
         resp = _snowflake.send_snow_api_request(
-            "POST",
-            "/api/v2/cortex/agent:run",
+            "POST", "/api/v2/cortex/agent:run",
             {"Content-Type": "application/json", "Accept": "application/json"},
-            {},
-            payload,
-            None,
-            120000,
+            {}, payload, None, 120000,
         )
-        status = resp.get("status", 0)
-        body   = resp.get("content") or resp.get("body") or resp.get("data") or ""
+        body = resp.get("content") or resp.get("body") or resp.get("data") or ""
         if isinstance(body, str):
             try:
                 body = _json.loads(body)
             except Exception:
                 pass
-
-        # Check for SSE events array (streaming response)
-        if isinstance(body, list):
-            for event in body:
-                if isinstance(event, dict):
-                    if event.get("event") == "error":
-                        err_code = str(event.get("data", {}).get("code", ""))
-                        agent_error = event.get("data", {}).get("message", str(body))
-                        if "399504" in err_code or "not authorized" in agent_error.lower():
-                            break  # Fall through to COMPLETE fallback
-                    elif event.get("event") == "message.delta":
-                        delta = event.get("data", {}).get("delta", {})
-                        content = delta.get("content", [])
-                        texts = [c["text"] for c in content if c.get("type") == "text"]
-                        if texts:
-                            return "\n".join(texts)
-        elif status == 200 and isinstance(body, dict):
-            choices = body.get("choices", [])
-            if choices:
-                content = choices[0].get("message", {}).get("content", [])
-                texts   = [c["text"] for c in content if c.get("type") == "text"]
-                return "\n".join(texts) or str(body)
-        elif status != 200:
-            agent_error = str(body)
-
+        result = _parse_agent_response(body)
+        if result:
+            return result
+        agent_error = str(body)
     except ImportError:
-        agent_error = "Not in SiS context"
+        pass
     except Exception as e:
         agent_error = str(e)
 
-    # ── Path 2: External / local dev — requests + explicit token ──────────────
-    if not agent_error or "399504" not in str(agent_error):
-        import requests as _req
-        try:
-            conn  = session.connection
-            host  = conn.host
-            token = conn.rest.token
-            resp = _req.post(
-                f"https://{host}/api/v2/cortex/agent:run",
-                headers={"Authorization": f'Snowflake Token="{token}"',
-                         "Content-Type": "application/json", "Accept": "application/json"},
-                json=payload, timeout=120,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                choices = data.get("choices", [])
-                if choices:
-                    content = choices[0].get("message", {}).get("content", [])
-                    texts = [c["text"] for c in content if c.get("type") == "text"]
-                    return "\n".join(texts) or str(data)
-            agent_error = f"{resp.status_code}: {resp.text[:200]}"
-        except Exception:
-            pass
-
-    # ── Path 3: CORTEX.COMPLETE fallback (when Agents endpoint not enabled) ───
+    # ── Path 3: CORTEX.COMPLETE fallback ──────────────────────────────────────
     sys_prompt = _V4_AGENT_INSTRUCTIONS.get(agent_name,
         "You are an AI assistant for data transformation pipelines.")
-
     history_text = ""
     if history:
         for m in history[-4:]:
-            role = m.get("role", "user")
+            role  = m.get("role", "user")
             parts = m.get("content", [])
             text  = parts[0].get("text", "") if isinstance(parts, list) else str(parts)
             history_text += f"\n{role.upper()}: {text}"
-
     prompt = f"{sys_prompt}\n{history_text}\nUSER: {message}\nASSISTANT:"
-    safe = prompt.replace("'", "''")
     try:
-        rows = session.sql(
-            f"SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.3-70b', '{safe}')"
+        rows  = session.sql(
+            "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.3-70b', ?)", params=[prompt]
         ).collect()
         reply = str(rows[0][0]) if rows else "No response."
-        return f"*(via CORTEX.COMPLETE — Agents endpoint not enabled on this account)*\n\n{reply}"
+        return f"*(via CORTEX.COMPLETE — Agents API not available in this runtime)*\n\n{reply}"
     except Exception as e:
-        return f"All paths failed. Last agent error: {agent_error}\nCOMPLETE error: {e}"
+        return f"All paths failed. Last error: {agent_error}\nCOMPLETE error: {e}"
 
 
 def render_agent_hub_tab():
