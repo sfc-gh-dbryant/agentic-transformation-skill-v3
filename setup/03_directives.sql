@@ -96,6 +96,17 @@ BEGIN
 - Filter out soft-deleted rows (IS_DELETED = TRUE) unless preserving full history is specified',
          3),
 
+        -- ── Dedup key selection — prevents wrong column picked as PK ─────────
+
+        ('%', 'SILVER', 'dedup_key_selection',
+         'When selecting the dedup / primary key column for a table:
+- PREFER columns ending in _KEY or _ID (e.g. ITEM_KEY, CALENDAR_KEY, CUSTOMER_ID) over date or timestamp columns
+- NEVER use a date or timestamp column (e.g. DAY_DATE, CREATED_AT, UPDATED_AT) as the primary dedup key unless there is NO _KEY or _ID column in the table
+- If multiple _ID or _KEY columns exist, prefer the one whose name most closely matches the table name (e.g. CALENDAR_KEY for a CALENDAR table)
+- When in doubt, deduplicate on the column with the highest cardinality relative to total row count
+- Use TRY_TO_VARCHAR() for any numeric-to-string conversion. Do NOT use TRY_CAST(x AS VARCHAR).',
+         6),
+
         -- ── Master dimension tables — SCD Type 2 ──────────────────────────────
         -- These tables are referenced by many downstream fact tables and change
         -- over time. Full change history is required for point-in-time joins.

@@ -221,10 +221,13 @@ You are a Snowflake SQL expert. Write a single CREATE OR REPLACE TABLE statement
 SOURCE TABLE: ' || cur_source_table || '
 TRANSFORMATION STRATEGY: ' || cur_strategy || '
 
-AVAILABLE SOURCE COLUMNS (copy these exact names into your SELECT — do not use any other names):
+══ AUTHORITATIVE COLUMN LIST (from INFORMATION_SCHEMA) ══
+These are the ONLY valid column names for this table. Every column in your SELECT must come from this list — exactly as written, including case:
     ' || REPLACE(col_list, ', ', chr(10) || '    ') || '
 
-YOUR SELECT must only reference these exact column names. Do not reference COLUMN_NAME, COLUMN1, or any placeholder.
+[HARD RULE] Do NOT use any column name not in the list above. Do NOT invent names.
+[HARD RULE] Do NOT use TRY_CAST(x AS VARCHAR). Use TRY_TO_VARCHAR(x) instead.
+[HARD RULE] The SELECT list must only contain real column names or expressions over real column names.
 
 PLANNED TRANSFORMATIONS: ' || cur_actions || '
 REASONING: ' || cur_reasoning || '
@@ -237,7 +240,8 @@ DIRECTIVES:
 
 ' || CASE WHEN retry_count > 0
     THEN 'YOUR PREVIOUS ATTEMPT FAILED: ' || COALESCE(last_error, 'unknown error') ||
-         ' — Check that every column in your SELECT exists in the AVAILABLE SOURCE COLUMNS list above.'
+         chr(10) || 'VALID COLUMNS ARE: ' || col_list ||
+         chr(10) || 'Every column in your SELECT must be in that list. Fix the offending column name and try again.'
     ELSE '' END || output_rules;
 
             SELECT SNOWFLAKE.CORTEX.COMPLETE(:active_model, :execution_prompt) INTO :llm_response;
@@ -252,6 +256,43 @@ DIRECTIVES:
                 generated_sql := TRIM(generated_sql);
                 -- Strip trailing semicolons (Snowflake EXECUTE IMMEDIATE rejects them)
                 generated_sql := TRIM(SPLIT_PART(generated_sql, ';', 1));
+
+                -- [P0-2a] Pre-execution column validation
+                -- Parse SELECT columns from generated DDL and cross-check against col_list
+                -- Catches hallucinated names before they hit EXECUTE IMMEDIATE
+                BEGIN
+                    LET parsed_cols VARCHAR;
+                    LET bad_col     VARCHAR := NULL;
+                    LET validate_sql VARCHAR := 'SELECT c.value::VARCHAR AS col ' ||
+                        'FROM TABLE(FLATTEN(STRTOK_SPLIT_TO_TABLE(''' ||
+                        REPLACE(REPLACE(REPLACE(REPLACE(generated_sql,
+                            chr(10), ' '), chr(13), ' '), '  ', ' '),
+                            '''', '''''') || ''', '' ''))) c ' ||
+                        'WHERE CONTAINS(UPPER('',' || REPLACE(col_list, ', ', ',') || ',''), '','' || UPPER(c.value) || '','' ) = FALSE ' ||
+                        'AND UPPER(c.value) RLIKE ''^[A-Z_][A-Z0-9_]*$'' ' ||
+                        'AND c.value NOT IN (''CREATE'',''OR'',''REPLACE'',''TABLE'',''AS'',''SELECT'',''FROM'',''WHERE'',''GROUP'',''BY'',''ORDER'',''DISTINCT'',''CASE'',''WHEN'',''THEN'',''ELSE'',''END'',''AND'',''NOT'',''NULL'',''IS'',''IN'',''ON'',''JOIN'',''LEFT'',''INNER'',''OUTER'',''COUNT'',''MAX'',''MIN'',''SUM'',''AVG'',''COALESCE'',''TRY_TO_VARCHAR'',''UPPER'',''LOWER'',''TRIM'',''CAST'',''CURRENT_TIMESTAMP'') ' ||
+                        'LIMIT 1';
+                    -- skip validation if col_list unavailable
+                    IF (col_list NOT LIKE '%(column list unavailable%') THEN
+                        BEGIN
+                            LET val_rs  RESULTSET := (EXECUTE IMMEDIATE :validate_sql);
+                            LET val_cur CURSOR FOR val_rs;
+                            OPEN val_cur;
+                            FETCH val_cur INTO bad_col;
+                            CLOSE val_cur;
+                        EXCEPTION WHEN OTHER THEN
+                            bad_col := NULL; -- validation query failed, skip check
+                        END;
+                    END IF;
+                    IF (bad_col IS NOT NULL) THEN
+                        last_error  := 'Column validation failed: [' || bad_col || '] not found in source schema. Valid columns: ' || col_list;
+                        retry_count := retry_count + 1;
+                        INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                        SELECT :execution_id, 'EXECUTOR', 'RETRY',
+                               SPLIT_PART(:cur_source_table, '.', -1) || ' pre-exec validation failed (attempt ' || :retry_count::VARCHAR || '): ' || :last_error;
+                        CONTINUE;
+                    END IF;
+                END;
 
                 -- [P0-2] DRY RUN: log DDL without executing
                 IF (is_dry_run) THEN
