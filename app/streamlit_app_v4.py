@@ -2449,6 +2449,55 @@ _V4_AGENTS = [
 _V4_AGENT_LABELS = {a["name"]: f"{a['icon']} {a['label']}" for a in _V4_AGENTS}
 
 
+def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> str:
+    """
+    Call a Cortex Agent via the REST API.
+    SNOWFLAKE.CORTEX.COMPLETE_AGENT does not exist as a SQL function;
+    agents are only reachable through /api/v2/cortex/agent:run.
+    """
+    import requests as _req
+
+    try:
+        db    = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
+        host  = session.connection.host
+        token = session.connection.rest.token
+    except Exception as e:
+        return f"Session error: {e}"
+
+    agent_id = f"{db}.AGENT_FRAMEWORK.{agent_name}"
+    messages = list(history or []) + [
+        {"role": "user", "content": [{"type": "text", "text": message}]}
+    ]
+
+    try:
+        resp = _req.post(
+            f"https://{host}/api/v2/cortex/agent:run",
+            headers={
+                "Authorization": f'Snowflake Token="{token}"',
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            json={"model": agent_id, "messages": messages},
+            timeout=120,
+        )
+    except Exception as e:
+        return f"Request failed: {e}"
+
+    if resp.status_code != 200:
+        return f"Agent error {resp.status_code}: {resp.text[:400]}"
+
+    try:
+        data    = resp.json()
+        choices = data.get("choices", [])
+        if not choices:
+            return f"No choices in response: {data}"
+        content = choices[0].get("message", {}).get("content", [])
+        texts   = [c["text"] for c in content if c.get("type") == "text"]
+        return "\n".join(texts) or str(data)
+    except Exception as e:
+        return f"Parse error: {e} — raw: {resp.text[:200]}"
+
+
 def render_agent_hub_tab():
     st.subheader("Cortex Agent Status")
     st.markdown('<div class="info-strip">6 agents deployed to <b>AGENT_FRAMEWORK</b>. Each wraps a set of ATS_TOOL_* stored procedures.</div>', unsafe_allow_html=True)
@@ -2569,14 +2618,7 @@ def render_agent_chat_tab():
     if prompt:
         st.session_state.v4_chat_history.append({"role": "user", "content": prompt})
         with st.spinner(f"{_V4_AGENT_LABELS.get(agent_choice)} thinking…"):
-            try:
-                rows = session.sql(
-                    f"SELECT SNOWFLAKE.CORTEX.COMPLETE_AGENT('AGENT_FRAMEWORK.{agent_choice}', ?, '[]')",
-                    params=[prompt]
-                ).collect()
-                reply = str(rows[0][0]) if rows else "No response."
-            except Exception as e:
-                reply = f"Error: {e}"
+                reply = _call_cortex_agent(agent_choice, prompt)
         st.session_state.v4_chat_history.append({"role": "agent", "content": reply})
         st.rerun()
 
@@ -2598,14 +2640,7 @@ def render_agent_chat_tab():
         if st.button(p, key=f"v4prompt_{p[:30]}"):
             st.session_state.v4_chat_history.append({"role": "user", "content": p})
             with st.spinner("Thinking…"):
-                try:
-                    rows = session.sql(
-                        f"SELECT SNOWFLAKE.CORTEX.COMPLETE_AGENT('AGENT_FRAMEWORK.{agent_choice}', ?, '[]')",
-                        params=[p]
-                    ).collect()
-                    reply = str(rows[0][0]) if rows else "No response."
-                except Exception as e:
-                    reply = f"Error: {e}"
+                    reply = _call_cortex_agent(agent_choice, p)
             st.session_state.v4_chat_history.append({"role": "agent", "content": reply})
             st.rerun()
 
