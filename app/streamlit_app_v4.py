@@ -128,6 +128,12 @@ st.markdown(f"""
     }}
     .main-header h1 {{ color: white; margin: 0; font-size: 1.5rem; }}
     .main-header p  {{ color: {SF_BLUE}; margin: 0.2rem 0 0; font-size: 0.82rem; }}
+    .main-header .v4-badge {{
+        display: inline-block; background: {SF_BLUE}; color: {SF_DARK};
+        font-size: 0.65rem; font-weight: 800; padding: 2px 8px;
+        border-radius: 10px; margin-left: 8px; vertical-align: middle;
+        letter-spacing: 0.05em;
+    }}
     .status-pill {{
         display: inline-block; padding: 2px 10px; border-radius: 12px;
         font-size: 0.75rem; font-weight: 600;
@@ -147,6 +153,33 @@ st.markdown(f"""
         white-space: pre-wrap; word-break: break-all;
         max-height: 260px; overflow-y: auto;
     }}
+    /* Sidebar nav */
+    .nav-section {{
+        font-size: 0.68rem; font-weight: 800; letter-spacing: 0.1em;
+        color: #8a9ab5; text-transform: uppercase;
+        padding: 0.6rem 0 0.2rem 0; margin-top: 0.2rem;
+    }}
+    section[data-testid="stSidebar"] button[kind="secondary"] {{
+        background: transparent !important;
+        border: none !important;
+        color: #2c3e50 !important;
+        text-align: left !important;
+        padding: 0.3rem 0.5rem !important;
+        font-size: 0.85rem !important;
+        font-weight: 400 !important;
+        width: 100% !important;
+    }}
+    section[data-testid="stSidebar"] button[kind="primary"] {{
+        background: {SF_BLUE}22 !important;
+        border: 1px solid {SF_BLUE}55 !important;
+        border-radius: 6px !important;
+        color: {SF_DARK} !important;
+        font-weight: 600 !important;
+        text-align: left !important;
+        padding: 0.3rem 0.5rem !important;
+        font-size: 0.85rem !important;
+        width: 100% !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -158,7 +191,7 @@ ctx = _db_context()
 
 st.markdown(f"""
 <div class="main-header">
-  <h1>🤖 Agentic Transformation Skill</h1>
+  <h1>🤖 Agentic Transformation Skill <span class="v4-badge">v4</span></h1>
   <p>{ctx['db']} &nbsp;·&nbsp; {ctx['role']} &nbsp;·&nbsp; {ctx['user']} &nbsp;·&nbsp; {ctx['wh']}</p>
 </div>
 """, unsafe_allow_html=True)
@@ -226,64 +259,96 @@ def render_phase_diagram(phase_states: dict | None = None) -> str:
 # Sidebar
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Sidebar nav — grouped navigation
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NAV_GROUPS = [
+    ("Pipeline", [
+        (0,  "⚙️",  "Setup"),
+        (5,  "💡",  "Context"),
+        (6,  "📐",  "Contracts"),
+        (7,  "🎯",  "Directives"),
+        (8,  "🤖",  "Workflow"),
+    ]),
+    ("Cortex Agents", [
+        (1,  "🏠",  "Agent Hub"),
+        (2,  "🎯",  "Orchestrate"),
+        (3,  "💬",  "Agent Chat"),
+        (4,  "🔧",  "Tool Inspector"),
+    ]),
+    ("Analytics", [
+        (9,  "🏆",  "Analytics Builder"),
+        (10, "🗂️",  "Registry"),
+        (11, "📊",  "Observe"),
+    ]),
+    ("Ops & Export", [
+        (12, "🏷️",  "Partner Routing"),
+        (13, "📦",  "DCM Export"),
+        (14, "📄",  "Documents"),
+    ]),
+]
+
+
 def render_sidebar():
-    st.sidebar.title("🤖 ATS v4 — Agents")
-    st.sidebar.markdown("<small>Cortex Agents + v3 Pipeline</small>", unsafe_allow_html=True)
+    if "active_tab" not in st.session_state:
+        st.session_state["active_tab"] = 0
 
-    if st.sidebar.button("🔄 Refresh"):
-        st.cache_data.clear()
-        st.rerun()
+    with st.sidebar:
+        st.markdown(f"""
+<div style="background:linear-gradient(135deg,{SF_DARK} 0%,#0D1B2E 100%);
+            border-radius:8px;padding:0.9rem 1rem 0.7rem;margin-bottom:0.8rem;">
+  <div style="color:white;font-size:1rem;font-weight:700;margin:0;">🤖 ATS</div>
+  <div style="color:{SF_BLUE};font-size:0.72rem;margin-top:2px;">v4 · Cortex Agents</div>
+</div>
+""", unsafe_allow_html=True)
 
-    st.sidebar.markdown("---")
+        for group_label, items in _NAV_GROUPS:
+            st.markdown(f'<div class="nav-section">{group_label}</div>', unsafe_allow_html=True)
+            for idx, icon, label in items:
+                active = st.session_state["active_tab"] == idx
+                if st.button(
+                    f"{icon}  {label}",
+                    key=f"sidenav_{idx}",
+                    use_container_width=True,
+                    type="primary" if active else "secondary",
+                ):
+                    st.session_state["active_tab"] = idx
+                    st.rerun()
 
-    try:
-        cov = run_query("SELECT * FROM AGENT_FRAMEWORK.COVERAGE_SUMMARY")
-        total_df = run_query("SELECT COUNT(*) AS cnt FROM AGENT_FRAMEWORK.TABLE_LINEAGE_MAP")
-        total = int(total_df.iloc[0]["CNT"]) if not total_df.empty else 0
-        silver_pct = round(float(cov["SILVER_PCT"].mean()), 0) if not cov.empty else 0
-        gold_pct   = round(float(cov["GOLD_PCT"].mean()), 0)   if not cov.empty else 0
-        st.sidebar.metric("Foundation Tables", total)
-        st.sidebar.metric("Enriched Coverage", f"{silver_pct}%")
-        st.sidebar.metric("Analytics Coverage", f"{gold_pct}%")
-    except Exception:
-        st.sidebar.caption("No coverage data")
+        st.markdown("---")
+        if st.button("🔄 Refresh", use_container_width=True, key="sidebar_refresh"):
+            st.cache_data.clear()
+            st.rerun()
 
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🔄 Workflow History")
+        st.markdown("---")
+        try:
+            cov = run_query("SELECT * FROM AGENT_FRAMEWORK.COVERAGE_SUMMARY")
+            total_df = run_query("SELECT COUNT(*) AS cnt FROM AGENT_FRAMEWORK.TABLE_LINEAGE_MAP")
+            total = int(total_df.iloc[0]["CNT"]) if not total_df.empty else 0
+            silver_pct = round(float(cov["SILVER_PCT"].mean()), 0) if not cov.empty else 0
+            gold_pct   = round(float(cov["GOLD_PCT"].mean()), 0)   if not cov.empty else 0
+            c1, c2 = st.columns(2)
+            c1.metric("Enriched", f"{silver_pct}%")
+            c2.metric("Analytics", f"{gold_pct}%")
+            st.caption(f"{total} Foundation tables")
+        except Exception:
+            st.caption("No coverage data")
 
-    try:
-        wf = run_query("""
-            SELECT
-                COUNT(*) AS total,
-                SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
-                SUM(CASE WHEN status = 'FAILED'    THEN 1 ELSE 0 END) AS failed
+        last_wf = run_query("""
+            SELECT status, current_phase, started_at
             FROM AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS
+            ORDER BY started_at DESC LIMIT 1
         """)
-        if not wf.empty:
-            c1, c2 = st.sidebar.columns(2)
-            c1.metric("✅ Done",  int(wf.iloc[0]["COMPLETED"]))
-            c2.metric("❌ Failed", int(wf.iloc[0]["FAILED"]))
-            st.sidebar.metric("Total Runs", int(wf.iloc[0]["TOTAL"]))
-    except Exception:
-        st.sidebar.caption("No workflow data")
+        if not last_wf.empty:
+            row = last_wf.iloc[0]
+            status = row["STATUS"]
+            pill_cls = "pill-green" if status == "COMPLETED" else ("pill-red" if status == "FAILED" else "pill-yellow")
+            st.markdown(f"**Last Run** &nbsp;<span class='status-pill {pill_cls}'>{status}</span>", unsafe_allow_html=True)
+            st.caption(f"{str(row['STARTED_AT'])[:16]}")
 
-    st.sidebar.markdown("---")
-
-    last_wf = run_query("""
-        SELECT status, current_phase, started_at
-        FROM AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS
-        ORDER BY started_at DESC LIMIT 1
-    """)
-    if not last_wf.empty:
-        row = last_wf.iloc[0]
-        status = row["STATUS"]
-        pill   = "pill-green" if status == "COMPLETED" else ("pill-red" if status == "FAILED" else "pill-yellow")
-        st.sidebar.markdown(f"**Last Run** &nbsp;<span class='status-pill {pill}'>{status}</span>", unsafe_allow_html=True)
-        st.sidebar.caption(f"Phase: {row['CURRENT_PHASE']} · {str(row['STARTED_AT'])[:16]}")
-
-    if "wf_execution_id" in st.session_state:
-        st.sidebar.markdown("---")
-        st.sidebar.caption(f"🆔 Active: `{st.session_state['wf_execution_id'][:8]}…`")
+        if "wf_execution_id" in st.session_state:
+            st.caption(f"🆔 `{st.session_state['wf_execution_id'][:8]}…`")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2621,14 +2686,6 @@ def main():
     if "active_tab" not in st.session_state:
         st.session_state["active_tab"] = 0
 
-    cols = st.columns(len(TAB_NAMES))
-    for i, (col, name) in enumerate(zip(cols, TAB_NAMES)):
-        if col.button(name, key=f"nav_{i}", use_container_width=True,
-                      type="primary" if st.session_state["active_tab"] == i else "secondary"):
-            st.session_state["active_tab"] = i
-            st.rerun()
-
-    st.divider()
     TAB_RENDER[st.session_state["active_tab"]]()
 
 
