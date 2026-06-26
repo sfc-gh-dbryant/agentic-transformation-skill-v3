@@ -2664,7 +2664,13 @@ def render_orchestrate_tab():
 
 def render_agent_chat_tab():
     st.subheader("Chat with an Agent")
-    st.markdown('<div class="info-strip">Send a message directly to any individual agent. The agent will call its tools and respond with reasoning + results.</div>', unsafe_allow_html=True)
+    st.warning(
+        "**Cortex Agents API is not supported from a warehouse-runtime Streamlit in Snowflake app** "
+        "([docs](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents#limitations)). "
+        "Chat below uses **CORTEX.COMPLETE** with each agent's system instructions as a functional stand-in. "
+        "For full agentic tool-calling, use **Snowflake CoWork** or **Cortex Code** to chat with these agents directly.",
+        icon="⚠️"
+    )
 
     agent_choice = st.selectbox(
         "Select agent",
