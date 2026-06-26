@@ -2452,41 +2452,61 @@ _V4_AGENT_LABELS = {a["name"]: f"{a['icon']} {a['label']}" for a in _V4_AGENTS}
 def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> str:
     """
     Call a Cortex Agent via the REST API.
-    In Streamlit-in-Snowflake, session.connection.rest is StoredProcRestful
-    which has no .token — the token lives at session.connection._session_token.
+
+    In Streamlit-in-Snowflake, session tokens are not accessible through the
+    connection object. Use _snowflake.send_snow_api_request() which handles
+    authentication internally, falling back to requests + explicit token for
+    external / local development contexts.
     """
-    import requests as _req
+    import json as _json
 
-    try:
-        db   = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
-        conn = session.connection
-        host = conn.host
-
-        # StoredProcRestful (SiS) has no .token — use connection._session_token
-        token = None
-        for getter in [
-            lambda: conn._session_token,
-            lambda: conn.rest._session_token,
-            lambda: conn._rest.token,
-            lambda: conn.rest.token,
-        ]:
-            try:
-                t = getter()
-                if t:
-                    token = t
-                    break
-            except Exception:
-                continue
-
-        if not token:
-            return "Could not retrieve session token for REST API call."
-    except Exception as e:
-        return f"Session error: {e}"
-
+    db = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
     agent_id = f"{db}.AGENT_FRAMEWORK.{agent_name}"
     messages = list(history or []) + [
         {"role": "user", "content": [{"type": "text", "text": message}]}
     ]
+    payload = {"model": agent_id, "messages": messages}
+
+    # ── Path 1: SiS internal authenticated caller ─────────────────────────────
+    try:
+        import _snowflake
+        resp = _snowflake.send_snow_api_request(
+            "POST",
+            "/api/v2/cortex/agent:run",
+            {"Content-Type": "application/json", "Accept": "application/json"},
+            {},
+            payload,
+            None,
+            120000,
+        )
+        status = resp.get("status", 0)
+        body   = resp.get("content") or resp.get("body") or resp.get("data") or ""
+        if isinstance(body, str):
+            try:
+                body = _json.loads(body)
+            except Exception:
+                pass
+        if status == 200:
+            choices = body.get("choices", []) if isinstance(body, dict) else []
+            if choices:
+                content = choices[0].get("message", {}).get("content", [])
+                texts   = [c["text"] for c in content if c.get("type") == "text"]
+                return "\n".join(texts) or str(body)
+            return str(body)
+        return f"Agent error {status}: {body}"
+    except ImportError:
+        pass  # Not in SiS — fall through to requests approach
+    except Exception as e:
+        return f"Agent call failed: {e}"
+
+    # ── Path 2: External / local dev — requests + explicit token ──────────────
+    import requests as _req
+    try:
+        conn  = session.connection
+        host  = conn.host
+        token = conn.rest.token
+    except Exception as e:
+        return f"Session error: {e}"
 
     try:
         resp = _req.post(
@@ -2496,7 +2516,7 @@ def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> s
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
-            json={"model": agent_id, "messages": messages},
+            json=payload,
             timeout=120,
         )
     except Exception as e:
