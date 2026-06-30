@@ -352,9 +352,8 @@ TRANSFORMATION STRATEGY: ' || cur_strategy || '
 These are the ONLY valid column names for this table. Every column in your SELECT must come from this list — exactly as written, including case:
     ' || REPLACE(col_list, ', ', chr(10) || '    ') || '
 
-[HARD RULE] Do NOT use any column name not in the list above. Do NOT invent names.
+[HARD RULE] Do NOT use any column name not in the list above. Do NOT invent names or aliases not derived from source columns.
 [HARD RULE] Do NOT use TRY_TO_VARCHAR() - it does not exist in Snowflake. Use TO_VARCHAR(x) for any value-to-string conversion.
-[HARD RULE] Do NOT reference CONFLICT_REDIRECTED, EFFECTIVE_TARGET_FQN, or any other internal framework variable as a column name. These are execution-context variables, not source columns.
 [HARD RULE] The SELECT list must only contain real column names or expressions over real column names.
 
 PLANNED TRANSFORMATIONS: ' || cur_actions || '
@@ -384,6 +383,19 @@ DIRECTIVES:
                 generated_sql := TRIM(generated_sql);
                 -- Strip trailing semicolons (Snowflake EXECUTE IMMEDIATE rejects them)
                 generated_sql := TRIM(SPLIT_PART(generated_sql, ';', 1));
+
+                -- [P0-2a-0] Fast guard: catch known hallucinated framework variable names
+                -- before the full column parser runs (which can fail silently)
+                IF (CONTAINS(UPPER(:generated_sql), 'CONFLICT_REDIRECTED') OR
+                    CONTAINS(UPPER(:generated_sql), 'EFFECTIVE_TARGET_FQN')) THEN
+                    last_error  := 'Generated SQL contains internal framework variable name (CONFLICT_REDIRECTED / EFFECTIVE_TARGET_FQN). These are not source columns. Use only columns from the authoritative list.';
+                    retry_count := retry_count + 1;
+                    INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+                    SELECT :execution_id, 'EXECUTOR', 'RETRY',
+                           SPLIT_PART(:cur_source_table, '.', -1) || ' attempt ' || :retry_count::VARCHAR ||
+                           ' failed (framework variable in DDL): ' || LEFT(:last_error, 200);
+                    CONTINUE;
+                END IF;
 
                 -- [P0-2a] Pre-execution column validation
                 -- Parse SELECT columns from generated DDL and cross-check against col_list
