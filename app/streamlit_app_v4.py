@@ -1802,7 +1802,96 @@ def _render_obs_run_summary():
             total_r = int(table_df["RETRIES"].fillna(0).astype(int).sum())
             st.warning(f"{total_r} retries across {(table_df['RETRIES'].fillna(0).astype(int) > 0).sum()} table(s). Green = clean, Yellow = retried but succeeded, Red = failed.")
     else:
-        st.info("No Executor results for this run yet.")
+        run_row = runs_df[runs_df["RUN"] == selected_run].iloc[0]
+        phase = run_row.get("CURRENT_PHASE", "")
+        if run_row["STATUS"] == "FAILED":
+            st.warning(f"This run failed at phase **{phase}** — the Executor did not run in this execution. Select the previous run to see table results.")
+        else:
+            st.info("The Executor built 0 tables in this run — either tables already existed with Overwrite OFF, or this was a resume run that skipped the Executor. Check the previous run for table results.")
+
+    st.divider()
+    _render_obs_cost_attribution(eid, runs_df[runs_df["RUN"] == selected_run].iloc[0])
+
+
+def _render_obs_cost_attribution(eid: str, run_row):
+    st.markdown("**💰 Cost Attribution**")
+
+    cost_df = run_query(f"""
+        SELECT warehouse_credits, cortex_credits, total_credits,
+               cortex_tokens, query_count, llm_call_count,
+               retry_llm_calls, cost_per_table, tables_built,
+               phase_breakdown, captured_at, cortex_data_lag
+        FROM AGENT_FRAMEWORK.WORKFLOW_COST_ATTRIBUTION
+        WHERE execution_id = '{eid}'
+        ORDER BY captured_at DESC LIMIT 1
+    """)
+
+    col_btn, col_note = st.columns([1, 3])
+    with col_btn:
+        if st.button("🔄 Capture / Refresh Costs", key=f"capture_cost_{eid}"):
+            try:
+                run_call(f"CALL AGENT_FRAMEWORK.CAPTURE_WORKFLOW_COST('{eid}')")
+                st.success("Cost data captured.")
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Capture failed: {e}")
+    with col_note:
+        st.caption("Warehouse credits are near real-time. Cortex LLM credits have up to 45-min delay — re-capture after that window for complete data.")
+
+    if cost_df.empty:
+        st.info("No cost data captured yet for this run. Click **Capture / Refresh Costs** above.")
+        return
+
+    r = cost_df.iloc[0]
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Total Credits",     f"{float(r['TOTAL_CREDITS'] or 0):.4f}")
+    c2.metric("Warehouse Credits", f"{float(r['WAREHOUSE_CREDITS'] or 0):.4f}")
+    c3.metric("Cortex LLM Credits",f"{float(r['CORTEX_CREDITS'] or 0):.4f}")
+    c4.metric("Credits / Table",   f"{float(r['COST_PER_TABLE'] or 0):.4f}" if r['COST_PER_TABLE'] else "—")
+    c5.metric("LLM Tokens",        f"{int(r['CORTEX_TOKENS'] or 0):,}")
+
+    col_l, col_r = st.columns(2)
+
+    with col_l:
+        st.markdown("**Phase Duration**")
+        if r["PHASE_BREAKDOWN"]:
+            import json
+            pb = r["PHASE_BREAKDOWN"] if isinstance(r["PHASE_BREAKDOWN"], dict) else json.loads(r["PHASE_BREAKDOWN"])
+            phases = ["schema_analyst", "planner", "executor", "validator", "reflector"]
+            phase_labels = ["Schema Analyst", "Planner", "Executor", "Validator", "Reflector"]
+            phase_data = []
+            for p, label in zip(phases, phase_labels):
+                secs = pb.get(p, {}).get("duration_sec", 0) or 0
+                phase_data.append({"Phase": label, "Seconds": int(secs)})
+            import pandas as pd
+            pdf = pd.DataFrame(phase_data)
+            st.bar_chart(pdf.set_index("Phase"))
+        else:
+            st.info("Phase timing not available.")
+
+    with col_r:
+        st.markdown("**LLM Call Summary**")
+        total_llm  = int(r["LLM_CALL_COUNT"] or 0)
+        retry_llm  = int(r["RETRY_LLM_CALLS"] or 0)
+        clean_llm  = max(total_llm - retry_llm, 0)
+        if total_llm > 0:
+            waste_pct = round(retry_llm / total_llm * 100, 1)
+        else:
+            waste_pct = 0
+        st.metric("Total LLM Calls", total_llm)
+        st.metric("Retry Calls (waste)", retry_llm,
+                  delta=f"{waste_pct}% of calls" if retry_llm > 0 else "0%",
+                  delta_color="inverse")
+        st.metric("Clean First-Attempt Calls", clean_llm)
+        if retry_llm == 0:
+            st.success("Zero retry waste — all LLM calls produced valid DDL on first attempt.")
+        elif waste_pct < 20:
+            st.warning(f"{waste_pct}% of LLM calls were retries.")
+        else:
+            st.error(f"{waste_pct}% of LLM calls were retries — consider reviewing directives.")
+
+    st.caption(f"Captured at: {r['CAPTURED_AT']} · Cortex data lag: {r['CORTEX_DATA_LAG']}")
 
 
 def _render_obs_kpi_metrics():
