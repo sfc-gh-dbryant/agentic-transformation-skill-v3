@@ -186,6 +186,52 @@ def clean_ddl(raw: str) -> str:
     ci = ddl.upper().find('CREATE')
     return ddl[ci:] if ci > 0 else ddl
 
+def check_gold_conflict(session, current_db: str, gold_schema: str, gold_table: str) -> str:
+    """
+    Returns 'VIEW', 'DYNAMIC_TABLE', 'EMPTY_TABLE', or 'SAFE'.
+    SAFE means: does not exist, or exists with rows (handled by brownfield/overwrite logic).
+    """
+    try:
+        type_rows = session.sql(f"""
+            SELECT COALESCE(MAX(TABLE_TYPE), 'NOT_FOUND')
+            FROM {current_db}.INFORMATION_SCHEMA.TABLES
+            WHERE UPPER(TABLE_SCHEMA) = UPPER('{gold_schema}')
+              AND UPPER(TABLE_NAME)   = UPPER('{gold_table}')
+        """).collect()
+        obj_type = type_rows[0][0] if type_rows else 'NOT_FOUND'
+    except Exception:
+        return 'SAFE'
+
+    if obj_type == 'NOT_FOUND':
+        return 'SAFE'
+    if obj_type == 'VIEW':
+        return 'VIEW'
+
+    # Check for Dynamic Table
+    try:
+        dt_rows = session.sql(f"""
+            SELECT COUNT(*) FROM {current_db}.INFORMATION_SCHEMA.DYNAMIC_TABLES
+            WHERE UPPER(TABLE_SCHEMA) = UPPER('{gold_schema}')
+              AND UPPER(TABLE_NAME)   = UPPER('{gold_table}')
+        """).collect()
+        if dt_rows and dt_rows[0][0] > 0:
+            return 'DYNAMIC_TABLE'
+    except Exception:
+        pass
+
+    # Check row count — empty regular table may belong to another pipeline
+    try:
+        cnt_rows = session.sql(
+            f"SELECT COUNT(*) FROM {current_db}.{gold_schema}.{gold_table} LIMIT 1"
+        ).collect()
+        if cnt_rows and cnt_rows[0][0] == 0:
+            return 'EMPTY_TABLE'
+    except Exception:
+        pass
+
+    return 'SAFE'
+
+
 def run(session, dry_run=True, max_tables=10):
     model_rows   = session.sql(
         "SELECT primary_model FROM AGENT_FRAMEWORK.MODEL_CONFIG WHERE config_key = 'default' LIMIT 1"
@@ -195,12 +241,19 @@ def run(session, dry_run=True, max_tables=10):
     active_wh    = session.sql("SELECT CURRENT_WAREHOUSE()").collect()[0][0]
 
     ctx_rows      = session.sql(
-        "SELECT COALESCE(pipeline_type,'CTAS'), COALESCE(target_lag,'1 hour') "
+        "SELECT COALESCE(pipeline_type,'CTAS'), COALESCE(target_lag,'1 hour'), "
+        "COALESCE(conflict_fallback_schema, '') "
         "FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT WHERE context_id = 1"
     ).collect()
-    pipeline_type = ctx_rows[0][0] if ctx_rows else 'CTAS'
-    target_lag    = ctx_rows[0][1] if ctx_rows else '1 hour'
-    is_dt         = (pipeline_type == 'DYNAMIC_TABLE')
+    pipeline_type           = ctx_rows[0][0] if ctx_rows else 'CTAS'
+    target_lag              = ctx_rows[0][1] if ctx_rows else '1 hour'
+    conflict_fallback_schema = ctx_rows[0][2] if ctx_rows else ''
+    is_dt                   = (pipeline_type == 'DYNAMIC_TABLE')
+
+    gold_schema_default = 'GOLD'
+    # Auto-derive fallback schema: GOLD_STAGING if not configured
+    if not conflict_fallback_schema:
+        conflict_fallback_schema = gold_schema_default + '_STAGING'
 
     contracts_ctx = (session.sql(
         "SELECT AGENT_FRAMEWORK.CONTRACTS_AS_PROMPT_CONTEXT('GOLD')"
@@ -219,7 +272,18 @@ def run(session, dry_run=True, max_tables=10):
         silver_table  = row[0]
         silver_schema = row[1]
         silver_fqn    = f"{current_db}.{silver_schema}.{silver_table}"
-        gold_name     = f"GOLD.{silver_table}_ANALYTICS"
+        gold_tbl_base = f"{silver_table}_ANALYTICS"
+        gold_name     = f"{gold_schema_default}.{gold_tbl_base}"
+
+        # ── Conflict check: redirect if target Gold object is a VIEW,
+        #    DYNAMIC TABLE, or empty table owned by another pipeline
+        conflict = check_gold_conflict(session, current_db, gold_schema_default, gold_tbl_base)
+        effective_gold_schema = gold_schema_default
+        redirected = False
+        if conflict in ('VIEW', 'DYNAMIC_TABLE', 'EMPTY_TABLE'):
+            effective_gold_schema = conflict_fallback_schema
+            gold_name             = f"{effective_gold_schema}.{gold_tbl_base}"
+            redirected            = True
 
         columns_list, directives_ctx = get_silver_metadata(session, current_db, silver_schema, silver_table)
 
@@ -255,16 +319,20 @@ def run(session, dry_run=True, max_tables=10):
 
                 session.sql(f"""
                     UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
-                    SET gold_table = '{gold_tbl_name}', gold_schema = '{gold_schema}',
+                    SET gold_table = '{gold_tbl_name}', gold_schema = '{effective_gold_schema}',
                         gold_status = 'COMPLETE', last_refreshed_at = CURRENT_TIMESTAMP(),
                         updated_at = CURRENT_TIMESTAMP()
                     WHERE UPPER(silver_table) = UPPER('{silver_table}')
                 """).collect()
 
+                redirect_note = f' [REDIRECTED to {effective_gold_schema} — conflict={conflict}]' if redirected else ''
                 proposals.append({'silver_table': silver_fqn, 'proposed_ddl': working_ddl,
-                                   'executed': True,
+                                   'executed': True, 'redirected': redirected,
+                                   'conflict_reason': conflict if redirected else None,
                                    'exec_result': {'status': 'SUCCESS', 'gold_table': extracted,
-                                                   'attempts': retry_count + 1}})
+                                                   'gold_schema': effective_gold_schema,
+                                                   'attempts': retry_count + 1,
+                                                   'redirect_note': redirect_note}})
                 executed += 1
                 success = True
                 break

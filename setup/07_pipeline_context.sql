@@ -15,6 +15,11 @@
 -- brownfield_mode:     FALSE (default) = build mode. TRUE = skip existing Silver tables
 --                      instead of aborting. Use when customer already has Silver tables
 --                      built outside ATS that should not be rebuilt.
+-- conflict_fallback_schema:
+--                      NULL (default) = auto-derive as output_schema || '_STAGING'.
+--                      Set explicitly to redirect conflicting objects to a specific schema.
+--                      Applies to Silver (Executor) and Gold (Gold Builder).
+--                      A conflict is: VIEW, DYNAMIC TABLE, or empty regular table at target.
 -- =============================================================================
 
 USE DATABASE IDENTIFIER($TARGET_DB);
@@ -31,8 +36,9 @@ CREATE TABLE IF NOT EXISTS AGENT_FRAMEWORK.PIPELINE_CONTEXT (
     dry_run             BOOLEAN       NOT NULL DEFAULT TRUE,
     overwrite_existing  BOOLEAN       NOT NULL DEFAULT FALSE,
     gold_output_mode    VARCHAR(20)   NOT NULL DEFAULT 'FLAT',
-    brownfield_mode     BOOLEAN       NOT NULL DEFAULT FALSE,
-    set_by              VARCHAR                DEFAULT CURRENT_USER(),
+    brownfield_mode          BOOLEAN       NOT NULL DEFAULT FALSE,
+    conflict_fallback_schema VARCHAR                DEFAULT NULL,
+    set_by                   VARCHAR                DEFAULT CURRENT_USER(),
     set_at              TIMESTAMP_NTZ          DEFAULT CURRENT_TIMESTAMP(),
     CONSTRAINT pk_pipeline_context PRIMARY KEY (context_id),
     CONSTRAINT chk_pipeline_type    CHECK (pipeline_type    IN ('CTAS', 'DYNAMIC_TABLE')),
@@ -123,6 +129,7 @@ $$;
 -- Drop old signatures before re-creating (avoids DEFAULT overload ambiguity)
 DROP PROCEDURE IF EXISTS AGENT_FRAMEWORK.SET_PIPELINE_CONTEXT(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN, BOOLEAN);
 DROP PROCEDURE IF EXISTS AGENT_FRAMEWORK.SET_PIPELINE_CONTEXT(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN, BOOLEAN, VARCHAR);
+DROP PROCEDURE IF EXISTS AGENT_FRAMEWORK.SET_PIPELINE_CONTEXT(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, BOOLEAN, BOOLEAN, VARCHAR, VARCHAR);
 
 CREATE OR REPLACE PROCEDURE AGENT_FRAMEWORK.SET_PIPELINE_CONTEXT(
     p_business_desc      VARCHAR  DEFAULT NULL,
@@ -133,8 +140,9 @@ CREATE OR REPLACE PROCEDURE AGENT_FRAMEWORK.SET_PIPELINE_CONTEXT(
     p_target_lag         VARCHAR  DEFAULT '1 hour',
     p_output_schema      VARCHAR  DEFAULT 'AGENT_FRAMEWORK_OUTPUT',
     p_dry_run            BOOLEAN  DEFAULT TRUE,
-    p_overwrite_existing BOOLEAN  DEFAULT FALSE,
-    p_gold_output_mode   VARCHAR  DEFAULT 'FLAT'
+    p_overwrite_existing     BOOLEAN  DEFAULT FALSE,
+    p_gold_output_mode       VARCHAR  DEFAULT 'FLAT',
+    p_conflict_fallback_schema VARCHAR DEFAULT NULL
 )
 RETURNS VARCHAR
 LANGUAGE SQL
@@ -163,20 +171,22 @@ BEGIN
         target_lag         = :p_target_lag,
         output_schema      = COALESCE(NULLIF(:p_output_schema, ''), 'AGENT_FRAMEWORK_OUTPUT'),
         dry_run            = :p_dry_run,
-        overwrite_existing = :p_overwrite_existing,
-        gold_output_mode   = UPPER(:p_gold_output_mode),
-        set_by             = CURRENT_USER(),
-        set_at             = CURRENT_TIMESTAMP()
+        overwrite_existing        = :p_overwrite_existing,
+        gold_output_mode          = UPPER(:p_gold_output_mode),
+        conflict_fallback_schema  = NULLIF(:p_conflict_fallback_schema, ''),
+        set_by                    = CURRENT_USER(),
+        set_at                    = CURRENT_TIMESTAMP()
     WHERE context_id = 1;
 
     RETURN OBJECT_CONSTRUCT(
-        'pipeline_type',      UPPER(:p_pipeline_type),
-        'target_lag',         :p_target_lag,
-        'output_schema',      COALESCE(NULLIF(:p_output_schema, ''), 'AGENT_FRAMEWORK_OUTPUT'),
-        'dry_run',            :p_dry_run,
-        'overwrite_existing', :p_overwrite_existing,
-        'gold_output_mode',   UPPER(:p_gold_output_mode),
-        'set_by',             CURRENT_USER()
+        'pipeline_type',             UPPER(:p_pipeline_type),
+        'target_lag',                :p_target_lag,
+        'output_schema',             COALESCE(NULLIF(:p_output_schema, ''), 'AGENT_FRAMEWORK_OUTPUT'),
+        'dry_run',                   :p_dry_run,
+        'overwrite_existing',        :p_overwrite_existing,
+        'gold_output_mode',          UPPER(:p_gold_output_mode),
+        'conflict_fallback_schema',  :p_conflict_fallback_schema,
+        'set_by',                    CURRENT_USER()
     )::VARCHAR;
 END;
 $$;
@@ -199,6 +209,40 @@ BEGIN
     WHERE context_id = 1;
     RETURN OBJECT_CONSTRUCT(
         'brownfield_mode', :p_brownfield_mode,
+        'set_by', CURRENT_USER()
+    )::VARCHAR;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- SET_CONFLICT_FALLBACK_SCHEMA
+-- Sets the schema ATS redirects output to when a conflict is detected:
+--   - Target is a VIEW
+--   - Target is a DYNAMIC TABLE
+--   - Target is a regular table with 0 rows (owned by another pipeline)
+-- Applies to both Silver (Executor) and Gold (Gold Builder).
+-- Pass NULL to use auto-derive: output_schema || '_STAGING'.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE AGENT_FRAMEWORK.SET_CONFLICT_FALLBACK_SCHEMA(
+    p_conflict_fallback_schema VARCHAR
+)
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+BEGIN
+    UPDATE AGENT_FRAMEWORK.PIPELINE_CONTEXT
+    SET conflict_fallback_schema = NULLIF(:p_conflict_fallback_schema, ''),
+        set_by                   = CURRENT_USER(),
+        set_at                   = CURRENT_TIMESTAMP()
+    WHERE context_id = 1;
+    RETURN OBJECT_CONSTRUCT(
+        'conflict_fallback_schema', :p_conflict_fallback_schema,
+        'note', CASE
+                    WHEN :p_conflict_fallback_schema IS NULL
+                    THEN 'Auto-derive mode: fallback = output_schema || ''_STAGING'''
+                    ELSE 'Explicit fallback schema set'
+                END,
         'set_by', CURRENT_USER()
     )::VARCHAR;
 END;

@@ -121,7 +121,7 @@ FROM SPECIFICATION $$
   "models": { "orchestration": "auto" },
   "orchestration": { "budget": { "seconds": 300, "tokens": 300000 } },
   "instructions": {
-    "orchestration": "You are the Planner for the Agentic Transformation Skill. For each Bronze table, you decide the transformation strategy and identify the primary key columns for the Silver layer.\n\nFor each table:\n1. Call get_pipeline_context to understand the business domain and analytics goals.\n2. Call get_contracts('SILVER') to get the structural rules that must be followed.\n3. Call get_directives with the table name to find any specific transformation instructions.\n4. Call get_schema_relationships to see what FK relationships the Schema Analyst found.\n5. Call search_prior_decisions with the table name to check if we have prior learnings about this table — if a prior run succeeded or failed, use that knowledge to adjust the strategy.\n6. Decide the strategy: one of 'direct_select', 'deduplicate', 'flatten_and_type', 'pivot', 'union', or 'composite_key_dedup'.\n7. Identify the primary key column(s) — these MUST be real column names from the source table.\n\nNever invent column names. If you are unsure about a column name, note it as 'unknown' rather than guessing.",
+    "orchestration": "You are the Planner for the Agentic Transformation Skill. For each Bronze table, you decide the transformation strategy and identify the primary key columns for the Silver layer.\n\nFor each table:\n1. Call get_pipeline_context to understand the business domain and analytics goals.\n2. Call get_contracts('SILVER') to get the structural rules that must be followed.\n3. Call get_directives with the table name to find any specific transformation instructions.\n4. Call get_schema_relationships to see what FK relationships the Schema Analyst found.\n5. Call search_prior_decisions with the table name to check if we have prior learnings about this table — if a prior run succeeded or failed, use that knowledge to adjust the strategy.\n6. Decide the strategy: one of 'direct_select', 'deduplicate', 'flatten_and_type', 'pivot', 'union', or 'composite_key_dedup'.\n7. Identify the primary key column(s) — these MUST be real column names from the source table.\n8. Call save_decision once per table with all fields populated. Use execution_id='agent_direct' if no execution_id was provided. Never skip save_decision — decisions that are not saved cannot be used by the Executor.\n\nNever invent column names. If you are unsure about a column name, note it as 'unknown' rather than guessing.",
     "response": "Return a JSON array of decisions, one per table: [{source_table, transformation_strategy, pk_columns (comma-separated), recommended_actions, llm_reasoning, confidence_score (0.0-1.0)}]"
   },
   "tools": [
@@ -196,6 +196,26 @@ FROM SPECIFICATION $$
         "description": "Returns the current Bronze-to-Silver-to-Gold lineage map showing what tables already exist and what is pending. Use to understand the current state before planning.",
         "input_schema": { "type": "object", "properties": {} }
       }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "save_decision",
+        "description": "Persists a single planner decision to the PLANNER_DECISIONS table. Call once per table after deciding its strategy. Required fields: execution_id, source_table, transformation_strategy, pk_columns, recommended_actions, llm_reasoning, confidence_score.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "execution_id":              { "type": "string",  "description": "Workflow execution ID — use 'agent_direct' if running outside a pipeline" },
+            "source_table":              { "type": "string",  "description": "Fully qualified Bronze table FQN" },
+            "transformation_strategy":   { "type": "string",  "description": "One of: direct_select, deduplicate, flatten_and_type, pivot, union, composite_key_dedup" },
+            "pk_columns":                { "type": "string",  "description": "Primary key column(s) — comma-separated. Use 'unknown' if not confirmed." },
+            "recommended_actions":       { "type": "string",  "description": "Plain-text description of recommended transformation actions" },
+            "llm_reasoning":             { "type": "string",  "description": "Reasoning behind the strategy choice" },
+            "confidence_score":          { "type": "number",  "description": "Confidence score between 0.0 and 1.0" }
+          },
+          "required": ["execution_id", "source_table", "transformation_strategy", "pk_columns", "recommended_actions", "llm_reasoning", "confidence_score"]
+        }
+      }
     }
   ],
   "tool_resources": {
@@ -228,6 +248,11 @@ FROM SPECIFICATION $$
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_GOLD_SCHEMAS",
       "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+    },
+    "save_decision": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_SAVE_PLANNER_DECISION",
+      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
     }
   }
 }

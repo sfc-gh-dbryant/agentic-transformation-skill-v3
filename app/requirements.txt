@@ -1,4 +1,1 @@
-streamlit>=1.50.0
-snowflake-snowpark-python>=1.26.0
-pandas>=2.0.0
 requests>=2.31.0

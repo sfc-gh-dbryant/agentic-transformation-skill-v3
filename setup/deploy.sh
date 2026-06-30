@@ -1,27 +1,35 @@
 #!/usr/bin/env bash
 # =============================================================================
-# deploy.sh  [v3]
-# Deploys the Agentic Transformation Skill v3 to a Snowflake database.
-# Runs scripts 00-11 in dependency order, then calls BOOTSTRAP.
+# deploy.sh  [v4]
+# Deploys the Agentic Transformation Skill v4 to a Snowflake database.
+# Runs all setup scripts in dependency order, then calls BOOTSTRAP.
 #
 # Script order:
 #   00  Schema + MODEL_CONFIG + BOOTSTRAP + RESET_FRAMEWORK
 #   01  Registry tables
 #   02  Schema Contracts
 #   03  Transformation Directives
-#   04a  Discover Schema SP
-#   04b  Planner SP
-#   04c  Executor SP         [v3: dry_run, safe output_schema, cross-db column injection]
-#   04d  Validator SP        [v3: pk_columns from PLANNER_DECISIONS]
-#   04e  Reflector SP
-#   04f  Orchestrator SP
-#   05  Gold Builder
-#   06  Schema Analyst
-#   07  Pipeline Context  [v3: output_schema, dry_run, overwrite_existing]
+#   04a  Discover Schema SP      [SQL Scripting]
+#   04b  Planner SP              [SQL Scripting]
+#   04c  Executor SP             [SQL Scripting — dry_run, safe output_schema, conflict redirect]
+#   04d  Validator SP            [SQL Scripting — pk_columns from PLANNER_DECISIONS, cross-db]
+#   04e  Reflector SP            [SQL Scripting]
+#   04f  Orchestrator SP         [SQL Scripting]
+#   05  Gold Builder             [Python SP — conflict redirect for Gold]
+#   06  Schema Analyst           [Python SP]
+#   07  Pipeline Context         [conflict_fallback_schema added in v4]
+#   08  Cost Attribution         [v4 NEW: WORKFLOW_COST_ATTRIBUTION + CAPTURE_WORKFLOW_COST]
 #   08  DCM Export
-#   09  Banner Config     [v3 NEW: multi-banner, VALIDATE_MULTI_BANNER]
-#   10  Cortex Search     [v3 NEW: ATS_KNOWLEDGE_CORPUS, ATS_KNOWLEDGE_SEARCH, SEARCH_ATS_KNOWLEDGE]
-#   11  Semantic View     [v3 NEW: ATS_PIPELINE_SEMANTICS for Cortex Analyst / Snowflake Intelligence]
+#   09  Banner Config            [multi-banner, VALIDATE_MULTI_BANNER]
+#   10  Cortex Search            [ATS_KNOWLEDGE_CORPUS, ATS_KNOWLEDGE_SEARCH]
+#   11  Semantic View            [ATS_PIPELINE_SEMANTICS for Cortex Analyst]
+#   12  Document Ingestion       [RAG: DOCUMENT_STAGE, DOCUMENT_CONTEXT_ITEMS]
+#   v4_tools  ATS_TOOL_* SPs     [v4 NEW: 35 tool stored procedures for Cortex Agents]
+#   v4_agents Cortex Agents      [v4 NEW: 6 Cortex Agents — deploy AFTER v4_tools]
+#
+# NOTE: SQL Scripting SPs (04a-04f) use BEGIN...END syntax. If snow sql -f fails
+# on these files due to || concatenation inside $$...$$, deploy them manually
+# via Python connector. See docs/v4_architecture.md § Known Limitations.
 #
 # Usage:
 #   ./setup/deploy.sh \
@@ -84,7 +92,7 @@ fi
 
 echo ""
 echo "========================================================"
-echo "  Agentic Transformation Skill — Deploy"
+echo "  Agentic Transformation Skill v4 — Deploy"
 echo "========================================================"
 echo "  Connection:    $CONNECTION"
 echo "  Database:      $TARGET_DB"
@@ -123,11 +131,14 @@ SCRIPTS=(
     "05_gold_builder.sql"
     "06_schema_analyst.sql"
     "07_pipeline_context.sql"
+    "08_cost_attribution.sql"
     "08_dcm_export.sql"
     "09_banner_config.sql"
     "10_cortex_search.sql"
     "11_semantic_view.sql"
     "12_document_ingestion.sql"
+    "v4_tools.sql"
+    "v4_agents.sql"
 )
 
 for script in "${SCRIPTS[@]}"; do
@@ -159,4 +170,8 @@ echo "  2. Open Snowsight and navigate to the Streamlit app."
 echo "  3. Tab 1 (Setup): verify model = llama3.3-70b and Cortex Intelligence shows ✅"
 echo "  4. Tab 2 (Context): set Pipeline Context and confirm dry_run=TRUE"
 echo "  5. Tab 5 (Workflow): run agentic workflow to populate knowledge base"
+echo ""
+echo "  v4 Agent Hub:"
+echo "  6. Tab 6 (Agent Hub): interact directly with any of the 6 Cortex Agents"
+echo "  7. Tab 7 (Orchestrate): run the full pipeline via ATS_ORCHESTRATOR_AGENT"
 echo "========================================================"
