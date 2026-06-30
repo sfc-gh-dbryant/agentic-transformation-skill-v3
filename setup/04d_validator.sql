@@ -36,7 +36,15 @@ DECLARE
     silver_schema_name VARCHAR;
     silver_table_name  VARCHAR;
     col_count          INTEGER;
+    output_db          VARCHAR;
 BEGIN
+    -- Read target database from PIPELINE_CONTEXT for cross-db INFORMATION_SCHEMA queries
+    SELECT SPLIT_PART(output_schema, '.', 1)
+    INTO   :output_db
+    FROM   AGENT_FRAMEWORK.PIPELINE_CONTEXT
+    ORDER BY CONTEXT_ID DESC
+    LIMIT  1;
+
     UPDATE AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS
     SET status = 'VALIDATING', current_phase = 'VALIDATOR'
     WHERE execution_id = :execution_id;
@@ -62,7 +70,7 @@ BEGIN
             bronze_tbl := current_result:table::VARCHAR;
 
             SELECT bronze_database || '.' || bronze_schema || '.' || bronze_table,
-                   silver_schema   || '.' || silver_table,
+                   :output_db || '.' || silver_schema   || '.' || silver_table,
                    silver_schema,
                    silver_table
             INTO   :bronze_tbl, :silver_tbl,
@@ -88,11 +96,18 @@ BEGIN
 
             BEGIN
                 -- Detect SCD2: check if IS_CURRENT column exists on the Silver table
-                SELECT COUNT(*) INTO :col_count
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE UPPER(table_schema)  = UPPER(:silver_schema_name)
-                  AND UPPER(table_name)    = UPPER(:silver_table_name)
-                  AND UPPER(column_name)   = 'IS_CURRENT';
+                -- Use EXECUTE IMMEDIATE with fully-qualified db to support cross-db output schemas
+                LET col_check_rs RESULTSET := (EXECUTE IMMEDIATE
+                    'SELECT COUNT(*) AS cnt FROM ' || output_db || '.INFORMATION_SCHEMA.COLUMNS ' ||
+                    'WHERE UPPER(table_schema) = UPPER(''' || silver_schema_name || ''') ' ||
+                    'AND UPPER(table_name) = UPPER(''' || silver_table_name || ''') ' ||
+                    'AND UPPER(column_name) = ''IS_CURRENT''');
+                LET col_cur CURSOR FOR col_check_rs;
+                OPEN col_cur;
+                FETCH col_cur INTO col_count;
+                CLOSE col_cur;
+
+                is_scd2 := (col_count > 0);
 
                 is_scd2 := (col_count > 0);
 
