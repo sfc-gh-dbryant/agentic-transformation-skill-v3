@@ -1,223 +1,241 @@
-# ATS v4 — Cortex Agents Architecture Proposal
+# ATS v4 — Cortex Agents Architecture
 
-**Status:** Design  
+**Status:** Implemented and Tested  
 **Date:** June 2026  
 **Author:** Danny Bryant  
-**Context:** Based on v3 testing session — natural evolution from stored procedure pipeline to agent-based pipeline
+**Database:** `ATS_V4.AGENT_FRAMEWORK`  
+**Test Run:** 5/5 Silver tables built, retries=0, 5/5 Validator passes (2026-06-30)
 
 ---
 
-## Problem with v3 Architecture
+## What Changed from v3
 
-v3 is a pipeline of stored procedures. Each phase makes **one LLM call**, gets a response, and moves on. There is no ability to:
+v3 is a pipeline of stored procedures — each phase makes one LLM call, executes, and moves on. v4 adds a Cortex Agents layer sitting alongside the SP pipeline, with two key changes:
 
-- Reason between steps within a phase
-- Use tools dynamically based on what the LLM discovers
-- Recover intelligently from bad output (v3 retries blindly 3 times)
-- Run phases in parallel
-- Ask a follow-up question before committing to an action
+1. **34 `ATS_TOOL_*` stored procedures** — each tool wraps a specific data operation (schema discovery, contract lookup, DDL execution, decision persistence). These become the callable tools for Cortex Agents.
 
-The result is that the Executor hallucinates columns because it can't check `INFORMATION_SCHEMA` mid-generation. The Planner can't confirm its FK assumptions by sampling data. The Reflector saves duplicate learnings because it can't check what already exists before writing.
+2. **6 Cortex Agents** — each phase has a corresponding agent that can invoke tools, reason across multiple steps, and use the knowledge base before committing to an action.
+
+The v3 SP pipeline remains the **primary batch execution path**. The Cortex Agents are available as an **interactive/agentic execution path** via the Agent Hub and Orchestrate tabs in the Streamlit app.
 
 ---
 
-## v4 Design: Five Agents + One Orchestrator
-
-Each v3 stored procedure phase becomes a **Cortex Agent** with its own tool set. The agent can make multiple LLM calls, invoke tools between them, and reason about results before concluding.
+## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    ORCHESTRATOR AGENT                       │
-│  Coordinates phases, manages approval gate, handles errors  │
-└──────┬──────────┬──────────┬──────────┬──────────┬──────────┘
-       │          │          │          │          │
-       ▼          ▼          ▼          ▼          ▼
-  SCHEMA      PLANNER    EXECUTOR   VALIDATOR  REFLECTOR
-  ANALYST     AGENT      AGENT      AGENT      AGENT
-  AGENT
+┌─────────────────────────────────────────────────────────────────────┐
+│                        STREAMLIT APP (ATS_V4)                       │
+│                                                                     │
+│  Pipeline Tab                      Agent Hub / Orchestrate Tab      │
+│  ─────────────────                 ─────────────────────────────    │
+│  Workflow SP Pipeline              Cortex Agents API                │
+│  (batch, reliable)                 (interactive, agentic)           │
+└──────────┬──────────────────────────────────┬───────────────────────┘
+           │                                  │
+           ▼                                  ▼
+┌──────────────────────┐           ┌──────────────────────────────────┐
+│   SP Pipeline (v3+)  │           │   Cortex Agents Layer (v4)       │
+│                      │           │                                  │
+│  WORKFLOW_SCHEMA_     │           │  ATS_SCHEMA_ANALYST_AGENT        │
+│  ANALYST             │           │  ATS_PLANNER_AGENT               │
+│  WORKFLOW_PLANNER    │           │  ATS_EXECUTOR_AGENT              │
+│  WORKFLOW_EXECUTOR   │           │  ATS_VALIDATOR_AGENT             │
+│  WORKFLOW_VALIDATOR  │           │  ATS_REFLECTOR_AGENT             │
+│  WORKFLOW_REFLECTOR  │           │  ATS_ORCHESTRATOR_AGENT          │
+└──────────┬───────────┘           └──────────────┬───────────────────┘
+           │                                       │
+           └───────────────────┬───────────────────┘
+                               │ Both paths read/write
+                               ▼
+           ┌─────────────────────────────────────────┐
+           │           Shared Data Layer              │
+           │                                         │
+           │  WORKFLOW_EXECUTIONS  WORKFLOW_LOG       │
+           │  TABLE_LINEAGE_MAP    PLANNER_DECISIONS  │
+           │  SCHEMA_RELATIONSHIPS WORKFLOW_LEARNINGS │
+           │  SCHEMA_CONTRACTS     TRANSFORMATION_    │
+           │  PIPELINE_CONTEXT     DIRECTIVES         │
+           │  WORKFLOW_COST_ATTRIBUTION               │
+           └─────────────────────────────────────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    ▼                     ▼
+           ATS_KNOWLEDGE_SEARCH    ATS_PIPELINE_SEMANTICS
+           (Cortex Search)         (Semantic View)
 ```
 
 ---
 
-## Agent Definitions
+## The 34 ATS_TOOL_* Stored Procedures
 
-### 1. Schema Analyst Agent
+Tools are defined as stored procedures in `AGENT_FRAMEWORK`. Each tool is a Python or SQL SP callable by both the Cortex Agents and directly from the SP pipeline.
 
-**Purpose:** Discover FK and entity-reference relationships across all tables in scope.
-
-**Tools:**
-| Tool | What it does |
-|------|-------------|
-| `discover_schema(fqn)` | Returns columns + types for a fully-qualified table from INFORMATION_SCHEMA |
-| `sample_data(fqn, n)` | Returns N sample rows — lets the agent confirm relationships by checking actual values |
-| `search_prior_relationships(query)` | Queries ATS_KNOWLEDGE_SEARCH for previously discovered relationships on similar tables |
-| `list_tables_in_schema(db, schema)` | Returns all tables in a schema — useful for discovering lookup/dimension tables |
-
-**What it gains over v3:**  
-v3 makes one LLM call with all schemas concatenated. The agent can iteratively confirm: "I think PROVINCE in RENSPETS_PRODUCTS references a PROVINCES table — let me check if that table exists, then sample both columns to confirm before declaring a FK."
-
----
-
-### 2. Planner Agent
-
-**Purpose:** Decide transformation strategy, primary key columns, and output DDL intent for each table.
-
-**Tools:**
-| Tool | What it does |
-|------|-------------|
-| `get_pipeline_context()` | Returns business description, domain, goals, constraints |
-| `get_contracts(layer)` | Returns active Schema Contracts for SILVER or GOLD |
-| `get_directives(table_pattern)` | Returns matching Transformation Directives for a table |
-| `get_schema_relationships(execution_id)` | Returns approved FK relationships from Schema Analyst |
-| `search_prior_decisions(query)` | Queries ATS_KNOWLEDGE_SEARCH for prior Planner decisions on similar tables |
-| `get_existing_gold_schemas()` | Returns existing Gold table definitions for gap analysis (B-06) |
-
-**What it gains over v3:**  
-The Planner can reason: "Search says we tried deduplicate on this table last time and it failed due to NULL primary keys — let me adjust the strategy to use a composite key instead." Multiple LLM calls within one planning phase.
+| Category | Tool | What it does |
+|----------|------|-------------|
+| **Schema** | `ATS_TOOL_DISCOVER_SCHEMA` | Returns columns + types for a table from INFORMATION_SCHEMA |
+| | `ATS_TOOL_SAMPLE_DATA` | Returns N sample rows from any table |
+| | `ATS_TOOL_GET_COLUMNS` | Returns authoritative column list for DDL generation |
+| | `ATS_TOOL_LIST_TABLES` | Lists all tables in a schema |
+| | `ATS_TOOL_GET_SCHEMA_RELATIONSHIPS` | Returns discovered FK relationships for an execution |
+| **Planning** | `ATS_TOOL_GET_PIPELINE_CONTEXT` | Returns business description, domain, goals, constraints |
+| | `ATS_TOOL_GET_CONTRACTS` | Returns active Schema Contracts for a layer |
+| | `ATS_TOOL_GET_DIRECTIVES` | Returns matching Transformation Directives for a table pattern |
+| | `ATS_TOOL_SAVE_PLANNER_DECISION` | Persists a Planner decision to `PLANNER_DECISIONS` |
+| | `ATS_TOOL_GET_PLANNER_DECISION` | Retrieves a Planner decision for a specific table |
+| **Execution** | `ATS_TOOL_EXECUTE_SQL` | Executes DDL against the output schema |
+| | `ATS_TOOL_CHECK_TABLE_EXISTS` | Checks if a target table has rows (overwrite guard) |
+| | `ATS_TOOL_VALIDATE_COLUMNS` | Cross-checks a column list against source schema |
+| | `ATS_TOOL_QUERY_SAMPLE` | Samples rows with a WHERE clause |
+| **Validation** | `ATS_TOOL_COUNT_ROWS` | Returns row count for source and target comparison |
+| | `ATS_TOOL_CHECK_PK_UNIQUENESS` | Returns duplicate count on PK columns |
+| **Knowledge** | `ATS_TOOL_SEARCH_KNOWLEDGE` | Searches ATS_KNOWLEDGE_SEARCH (Cortex Search) |
+| | `ATS_TOOL_SAVE_LEARNING` | Merges a learning into `WORKFLOW_LEARNINGS` |
+| | `ATS_TOOL_GET_WORKFLOW_LOG` | Returns log entries for an execution |
+| | `ATS_TOOL_GET_EXECUTOR_OUTPUT` | Returns DDL and success status per table |
 
 ---
 
-### 3. Executor Agent
+## The 6 Cortex Agents
 
-**Purpose:** Generate and execute the Silver-layer DDL for each table.
+Each agent is defined using `CREATE AGENT` in Snowflake. Agents use `llama3.3-70b` and are scoped to `ATS_V4.AGENT_FRAMEWORK`.
 
-**Tools:**
-| Tool | What it does |
-|------|-------------|
-| `get_columns(fqn)` | Returns exact column list from INFORMATION_SCHEMA before generating DDL |
-| `execute_sql(ddl)` | Executes DDL against the output schema, returns success/error |
-| `validate_column_exists(table, column)` | Checks a specific column exists before referencing it |
-| `check_table_exists(fqn)` | Checks if target table already has rows (overwrite protection) |
-| `get_sample_rows(fqn, n)` | Samples source data to understand actual values before transformation |
+### 1. ATS_SCHEMA_ANALYST_AGENT
 
-**What it gains over v3:**  
-Today the Executor hallucinates column names because column injection happens once in the prompt. With tools, the agent calls `get_columns()` before writing any DDL, then `validate_column_exists()` for each column it plans to reference. Retry means: "The column INGEST_DATE doesn't exist — let me call get_columns() again and regenerate with only columns that actually exist." Zero hallucination with tool-grounded generation.
+**Purpose:** Discover entity relationships across all Bronze tables before planning begins.
+
+**Key tools:** `DISCOVER_SCHEMA`, `SAMPLE_DATA`, `LIST_TABLES`, `SEARCH_KNOWLEDGE`
+
+**What it does that the SP can't:** Iteratively confirms FK hypotheses by sampling actual column values. Rather than declaring "PROVINCE in RENSPETS looks like a FK", it samples both columns and verifies overlap before recording the relationship. Confidence scores reflect actual evidence, not LLM guesswork.
+
+**Output:** `SCHEMA_RELATIONSHIPS` table — relationship type, source/target table+column, confidence score, LLM reasoning.
 
 ---
 
-### 4. Validator Agent
+### 2. ATS_PLANNER_AGENT
 
-**Purpose:** Verify the generated Silver table meets quality expectations.
+**Purpose:** Decide transformation strategy and primary key columns for each table.
 
-**Tools:**
-| Tool | What it does |
-|------|-------------|
-| `count_rows(fqn)` | Returns row count for source and target comparison |
-| `check_pk_uniqueness(fqn, pk_cols)` | Returns duplicate count on specified PK columns |
-| `compare_counts(source, target)` | Returns variance between source and target row counts |
-| `query_sample(fqn, where_clause)` | Samples rows matching a condition — useful for investigating failures |
-| `get_planner_decision(table)` | Retrieves the Planner's strategy and PK columns for this table |
+**Key tools:** `GET_PIPELINE_CONTEXT`, `GET_CONTRACTS`, `GET_DIRECTIVES`, `GET_SCHEMA_RELATIONSHIPS`, `SEARCH_KNOWLEDGE`, `SAVE_PLANNER_DECISION`
 
-**What it gains over v3:**  
-v3 Validator inferred the PK column from schema. The agent calls `get_planner_decision()` to get the authoritative PK from the Planner, then calls `check_pk_uniqueness()` with the correct column. If variance is unexpected, it can call `query_sample()` to investigate why before logging FAIL.
+**What it does that the SP can't:** Looks up prior decisions for similar tables before planning, adapts strategy based on FK relationships discovered by Schema Analyst, and validates its PK selection against actual data before committing.
+
+**Output:** `PLANNER_DECISIONS` table — strategy, PK columns, recommended actions, LLM reasoning, confidence score.
 
 ---
 
-### 5. Reflector Agent
+### 3. ATS_EXECUTOR_AGENT
 
-**Purpose:** Extract learnings from the run and merge them into the knowledge base.
+**Purpose:** Generate and execute Silver-layer DDL for each table with zero column hallucination.
 
-**Tools:**
-| Tool | What it does |
-|------|-------------|
-| `search_similar_learnings(query)` | Searches ATS_KNOWLEDGE_SEARCH before saving — avoids duplicates |
-| `save_learning(observation, recommendation, confidence)` | Merges a new learning into WORKFLOW_LEARNINGS |
-| `get_workflow_log(execution_id)` | Returns all ABORTED, FAILED, and PASS entries for this run |
-| `get_executor_output(execution_id)` | Returns DDL generated and success/failure status per table |
+**Key tools:** `GET_COLUMNS`, `GET_PLANNER_DECISION`, `GET_DIRECTIVES`, `GET_CONTRACTS`, `VALIDATE_COLUMNS`, `EXECUTE_SQL`
 
-**What it gains over v3:**  
-v3 Reflector saves learnings without checking for duplicates. The agent calls `search_similar_learnings()` first — if a learning already exists with high confidence, it increments `times_observed` instead of creating a duplicate. Higher knowledge base quality over time.
+**Key guardrails implemented:**
+- `ATS_TOOL_GET_COLUMNS` called before any DDL generation — agent only knows columns that exist
+- Pre-execution `SELECT INTO` guard catches hallucinated column names before hitting Snowflake
+- `CONFLICT_REDIRECTED` and `EFFECTIVE_TARGET_FQN` are internal variables — blocked from appearing in generated DDL
+- 3-attempt self-correcting loop: if DDL fails, the error is fed back to the agent with the authoritative column list
 
----
-
-### 6. Orchestrator Agent
-
-**Purpose:** Coordinate the five agents in sequence, manage the approval gate, handle failures, and surface results to the Streamlit UI.
-
-**Tools:**
-| Tool | What it does |
-|------|-------------|
-| `call_agent(agent_name, params)` | Invokes a sub-agent and returns its result |
-| `get_workflow_status(execution_id)` | Returns current phase and status |
-| `update_workflow_status(execution_id, phase, status)` | Writes phase transitions to WORKFLOW_EXECUTIONS |
-| `notify_approval_gate(execution_id, relationships)` | Pauses execution and surfaces Schema Analyst results for human review |
-| `log_workflow_event(execution_id, phase, message)` | Writes to WORKFLOW_LOG |
+**Result from testing:** 5/5 tables built, **retries=0** on clean run after guardrails deployed.
 
 ---
 
-## What This Unlocks
+### 4. ATS_VALIDATOR_AGENT
 
-| Capability | v3 | v4 |
-|-----------|----|----|
-| Column hallucination | Mitigated by pre-injecting column list | Eliminated — agent validates before generating |
-| Retry logic | 3 blind retries | Reasoned retry with tool-grounded diagnosis |
-| FK confirmation | LLM guesses from column names | Agent samples actual data to confirm |
-| Duplicate learnings | Can occur | Agent deduplicates before saving |
-| Parallel execution | Sequential only | Orchestrator can run Schema Analyst on all tables in parallel |
-| Gold awareness | None | Planner agent calls `get_existing_gold_schemas()` before planning |
-| Document ingestion (B-01) | Not implemented | Reflector or Planner agent calls `parse_document()` tool |
-| Mid-phase reasoning | Single LLM call per phase | Multiple calls, tool-informed decisions |
+**Purpose:** Verify each Silver table meets quality expectations against its Bronze source.
 
----
+**Key tools:** `COUNT_ROWS`, `CHECK_PK_UNIQUENESS`, `QUERY_SAMPLE`, `GET_PLANNER_DECISION`
 
-## Infrastructure Already in Place (from v3)
+**Key fixes vs original design:**
+- Reads `output_schema` from `PIPELINE_CONTEXT` to construct fully qualified Silver table references (cross-database)
+- Uses `EXECUTE IMMEDIATE` for cross-database `INFORMATION_SCHEMA` lookups (SCD2 detection)
+- Validates against actual Planner PK columns, not schema-inferred columns
 
-These v3 components become the tool backends for v4 agents with no changes:
-
-| v3 Component | v4 Role |
-|-------------|---------|
-| `ATS_KNOWLEDGE_SEARCH` (Cortex Search) | Tool backend for `search_prior_decisions()`, `search_similar_learnings()`, `search_prior_relationships()` |
-| `ATS_PIPELINE_SEMANTICS` (Semantic View) | Tool backend for natural language queries about pipeline state |
-| `AGENT_FRAMEWORK.DISCOVER_SCHEMA` SP | Tool backend for `discover_schema()` |
-| `AGENT_FRAMEWORK.WORKFLOW_LOG` | Tool backend for `get_workflow_log()` |
-| `AGENT_FRAMEWORK.SCHEMA_CONTRACTS` | Tool backend for `get_contracts()` |
-| `AGENT_FRAMEWORK.TRANSFORMATION_DIRECTIVES` | Tool backend for `get_directives()` |
-
-The v3 → v4 migration is primarily **wrapping existing SPs as Cortex Agent tools** and replacing single-call LLM prompts with agent reasoning loops. The data model, Streamlit app, and knowledge base are unchanged.
+**Validation checks per table:**
+1. Row count comparison (Bronze vs Silver) — variance tolerance: 1%
+2. SCD2 detection via `IS_CURRENT` column existence
+3. PK uniqueness check using Planner-specified key columns
 
 ---
 
-## Deployment Model
+### 5. ATS_REFLECTOR_AGENT
 
-Each agent is defined as a **Cortex Agent** in Snowflake:
+**Purpose:** Extract learnings from the run and merge them into the persistent knowledge base.
 
-```sql
-CREATE AGENT AGENT_FRAMEWORK.ATS_EXECUTOR_AGENT
-    MODEL = 'llama3.3-70b'
-    TOOLS = (
-        ATS_GET_COLUMNS_TOOL,
-        ATS_EXECUTE_SQL_TOOL,
-        ATS_VALIDATE_COLUMN_TOOL,
-        ATS_CHECK_TABLE_EXISTS_TOOL,
-        ATS_GET_SAMPLE_ROWS_TOOL
-    )
-    SYSTEM_PROMPT = '...';
+**Key tools:** `GET_WORKFLOW_LOG`, `GET_EXECUTOR_OUTPUT`, `SEARCH_KNOWLEDGE`, `SAVE_LEARNING`
+
+**Deduplication:** Agent calls `SEARCH_KNOWLEDGE` before saving — if a similar learning exists with high confidence, it increments `times_observed` rather than creating a duplicate.
+
+**Learning types captured:**
+- Type casting patterns (e.g., which columns need `TIMESTAMP_NTZ`)
+- Dedup key selection patterns (e.g., prefer `_KEY` suffix over timestamp columns)
+- Table-specific anomalies (e.g., SCD2 pattern detected in specific tables)
+
+---
+
+### 6. ATS_ORCHESTRATOR_AGENT
+
+**Purpose:** Coordinate the five agents in sequence, manage the Schema Analyst approval gate, and surface results to the Streamlit UI.
+
+**Key tools:** All phase tools + `GET_WORKFLOW_STATUS`, `UPDATE_WORKFLOW_STATUS`, `LOG_WORKFLOW_EVENT`
+
+**Approval gate:** After Schema Analyst completes, the Orchestrator pauses and surfaces the discovered relationships for human review. Low/medium confidence relationships are highlighted. The user approves or rejects before Planner proceeds.
+
+---
+
+## What v4 Resolved vs v4 Design Goals
+
+| Design Goal | Status | Notes |
+|-------------|--------|-------|
+| Column hallucination eliminated | ✅ | GET_COLUMNS tool + pre-exec guard → retries=0 |
+| Tool-grounded FK confirmation | ✅ | Schema Analyst samples data before recording relationships |
+| Knowledge base deduplication | ✅ | Reflector searches before saving |
+| Approval gate UX | ✅ | Pause after Schema Analyst, review table in Streamlit |
+| Cost attribution | ✅ | `CAPTURE_WORKFLOW_COST` SP + Observe tab cost section |
+| Cross-database output support | ✅ | Validator reads output_db from PIPELINE_CONTEXT |
+| Parallel execution | ❌ | Still sequential — Cortex Agents parallel calling not in scope |
+| Gold awareness in Planner | 🔶 | Tool defined, not yet wired into default Planner prompt |
+
+---
+
+## Deployment
+
+**Database:** `ATS_V4` | **Schema:** `AGENT_FRAMEWORK`  
+**Model:** `llama3.3-70b` (all agents)  
+**Warehouse:** `COMPUTE_WH` (Streamlit), `DBRYANT_COCO_WH_S` (testing)
+
+**Setup files (in order):**
+```
+00_bootstrap.sql              — Schema, warehouse, model config
+01_transformation_registry.sql — WORKFLOW_EXECUTIONS, TABLE_LINEAGE_MAP, WORKFLOW_LOG
+02_schema_contracts.sql       — SCHEMA_CONTRACTS table + seed data
+03_directives.sql             — TRANSFORMATION_DIRECTIVES table + seed data
+04a_discover_schema.sql       — WORKFLOW_SCHEMA_ANALYST SP
+04b_planner.sql               — WORKFLOW_PLANNER SP
+04c_executor.sql              — WORKFLOW_EXECUTOR SP (with guardrails)
+04d_validator.sql             — WORKFLOW_VALIDATOR SP (cross-database aware)
+04e_reflector.sql             — WORKFLOW_REFLECTOR SP
+04f_orchestrator.sql          — WORKFLOW_ORCHESTRATOR SP
+05_gold_builder.sql           — WORKFLOW_GOLD_BUILDER SP
+07_pipeline_context.sql       — PIPELINE_CONTEXT table
+08_cost_attribution.sql       — WORKFLOW_COST_ATTRIBUTION table + CAPTURE_WORKFLOW_COST SP
+v4_tools.sql                  — All 34 ATS_TOOL_* stored procedures
+v4_agents.sql                 — All 6 Cortex Agent definitions
+10_cortex_search.sql          — ATS_KNOWLEDGE_SEARCH Cortex Search service
+11_semantic_view.sql          — ATS_PIPELINE_SEMANTICS semantic view
 ```
 
-The Orchestrator Agent calls each sub-agent via the Cortex Agents API, passing the execution context as the conversation input.
+**Deploy command:**
+```bash
+./setup/deploy.sh --connection CoCo-Green --database ATS_V4 --bronze-schema BRONZE
+```
 
 ---
 
-## Migration Path from v3
+## Known Limitations
 
-| Step | Action |
-|------|--------|
-| 1 | Wrap each SP's core logic as a Cortex Agent tool (Python function + tool definition) |
-| 2 | Replace each SP's LLM call with an agent invocation (Orchestrator calls sub-agent) |
-| 3 | Retire `WORKFLOW_SCHEMA_ANALYST`, `WORKFLOW_PLANNER`, `WORKFLOW_EXECUTOR`, `WORKFLOW_VALIDATOR`, `WORKFLOW_REFLECTOR` SPs |
-| 4 | Keep `WORKFLOW_EXECUTIONS`, `WORKFLOW_LOG`, `TABLE_LINEAGE_MAP` — data model is unchanged |
-| 5 | Streamlit app requires minimal changes — phases still emit to WORKFLOW_LOG, same display logic |
-
-v3 and v4 can coexist in the same database during migration. The Orchestrator SP simply routes to either the SP-based or agent-based implementation based on a config flag.
-
----
-
-## Open Questions for v4 Design
-
-1. **Approval gate UX** — with agents, the Orchestrator can surface the Schema Analyst result via a structured message. How does this integrate with the Streamlit approval gate UI?
-
-2. **Token budget per agent** — each agent now has its own context window. How do we manage cost for large schemas (LCL V2's 39 columns × 14 banners)?
-
-3. **Agent-to-agent communication** — does the Planner agent receive a structured JSON output from the Schema Analyst agent, or a natural language summary?
-
-4. **Parallelism model** — the Orchestrator could run Schema Analyst on all 5 tables simultaneously. Does Snowflake Cortex Agents support parallel agent calls today?
+| Limitation | Impact | Workaround |
+|------------|--------|------------|
+| `snow sql -f` fails on `$$` blocks with `\|\|` inside | Cannot deploy SQL Scripting SPs via CLI | Use Python connector with explicit key auth |
+| `CORTEX_FUNCTIONS_USAGE_HISTORY` has 45-min delay | Cost attribution shows 0 Cortex credits immediately after run | Re-capture costs 45 min after run completes |
+| Cortex Agent parallel calls not implemented | Pipeline still sequential | Acceptable for current scale |
+| `CONFLICT_REDIRECTED` hallucination (mitigated) | First attempt generates invalid column name | Pre-execution `SELECT INTO` guard catches and blocks before execute |
