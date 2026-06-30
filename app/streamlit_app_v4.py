@@ -1706,11 +1706,103 @@ def render_observability_tab():
     st.subheader("Observability")
     _render_obs_kpi_metrics()
     st.divider()
+    _render_obs_run_summary()
+    st.divider()
     _render_obs_charts()
     st.divider()
     _render_obs_learnings()
-    st.markdown("**Recent Workflow Log**")
-    _render_obs_workflow_log()
+    with st.expander("📋 Raw Workflow Log", expanded=False):
+        _render_obs_workflow_log()
+
+
+def _render_obs_run_summary():
+    runs_df = run_query("""
+        SELECT execution_id, COALESCE(workflow_name, execution_id) AS RUN,
+               started_at, status, current_phase
+        FROM AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS
+        ORDER BY started_at DESC LIMIT 20
+    """)
+    if runs_df.empty:
+        st.info("No runs yet.")
+        return
+
+    run_options = runs_df["RUN"].tolist()
+    selected_run = st.selectbox("Run", run_options, key="obs_run_selector")
+    eid = runs_df.loc[runs_df["RUN"] == selected_run, "EXECUTION_ID"].iloc[0]
+
+    c1, c2, c3, c4 = st.columns(4)
+    row = runs_df[runs_df["RUN"] == selected_run].iloc[0]
+    ok_count   = run_query(f"SELECT COUNT(*) AS N FROM AGENT_FRAMEWORK.WORKFLOW_LOG WHERE execution_id='{eid}' AND phase='EXECUTOR' AND status='OK'")
+    fail_count = run_query(f"SELECT COUNT(*) AS N FROM AGENT_FRAMEWORK.WORKFLOW_LOG WHERE execution_id='{eid}' AND phase='EXECUTOR' AND status='FAILED'")
+    retry_count = run_query(f"SELECT COUNT(*) AS N FROM AGENT_FRAMEWORK.WORKFLOW_LOG WHERE execution_id='{eid}' AND phase='EXECUTOR' AND status='RETRY'")
+    c1.metric("Status",   row["STATUS"])
+    c2.metric("Tables Built", int(ok_count["N"].iloc[0]) if not ok_count.empty else 0)
+    c3.metric("Failures",     int(fail_count["N"].iloc[0]) if not fail_count.empty else 0)
+    c4.metric("Total Retries", int(retry_count["N"].iloc[0]) if not retry_count.empty else 0)
+
+    st.markdown("**Per-Table Results**")
+    table_df = run_query(f"""
+        WITH ok AS (
+            SELECT
+                SPLIT_PART(message, ' → ', 1)                          AS TABLE_NAME,
+                message                                                  AS OK_MSG,
+                created_at
+            FROM AGENT_FRAMEWORK.WORKFLOW_LOG
+            WHERE execution_id = '{eid}'
+              AND phase = 'EXECUTOR'
+              AND status = 'OK'
+        ),
+        retries AS (
+            SELECT
+                SPLIT_PART(message, ' attempt', 1)  AS TABLE_NAME,
+                COUNT(*)                            AS RETRIES
+            FROM AGENT_FRAMEWORK.WORKFLOW_LOG
+            WHERE execution_id = '{eid}'
+              AND phase = 'EXECUTOR'
+              AND status = 'RETRY'
+            GROUP BY 1
+        ),
+        failed AS (
+            SELECT
+                SPLIT_PART(message, ' FAILED', 1)   AS TABLE_NAME,
+                message                             AS FAIL_MSG
+            FROM AGENT_FRAMEWORK.WORKFLOW_LOG
+            WHERE execution_id = '{eid}'
+              AND phase = 'EXECUTOR'
+              AND status = 'FAILED'
+        )
+        SELECT
+            COALESCE(ok.TABLE_NAME, failed.TABLE_NAME)          AS TABLE_NAME,
+            CASE WHEN ok.TABLE_NAME IS NOT NULL THEN '✅ OK'
+                 ELSE '❌ FAILED' END                           AS RESULT,
+            COALESCE(retries.RETRIES, 0)                        AS RETRIES,
+            REGEXP_SUBSTR(ok.OK_MSG, 'retries=(\\d+)', 1,1,'e',1) AS RETRIES_CONFIRMED,
+            LEFT(COALESCE(ok.OK_MSG, failed.FAIL_MSG), 120)     AS DETAIL
+        FROM ok
+        FULL OUTER JOIN failed  ON UPPER(ok.TABLE_NAME) = UPPER(failed.TABLE_NAME)
+        LEFT  JOIN retries      ON UPPER(COALESCE(ok.TABLE_NAME, failed.TABLE_NAME)) = UPPER(retries.TABLE_NAME)
+        ORDER BY TABLE_NAME
+    """)
+
+    if not table_df.empty:
+        def _style(row):
+            if row["RESULT"] == "❌ FAILED":
+                return ["background-color:#f8d7da; color:#721c24"] * len(row)
+            if int(row["RETRIES"] or 0) > 0:
+                return ["background-color:#fff3cd; color:#856404"] * len(row)
+            return ["background-color:#d4edda; color:#155724"] * len(row)
+        st.dataframe(
+            table_df[["TABLE_NAME","RESULT","RETRIES","DETAIL"]].style.apply(_style, axis=1),
+            use_container_width=True, hide_index=True
+        )
+        zero_retry = (table_df["RETRIES"].fillna(0).astype(int) == 0).all()
+        if zero_retry:
+            st.success("All tables built on first attempt — no retries needed.")
+        else:
+            total_r = int(table_df["RETRIES"].fillna(0).astype(int).sum())
+            st.warning(f"{total_r} retries across {(table_df['RETRIES'].fillna(0).astype(int) > 0).sum()} table(s). Green = clean, Yellow = retried but succeeded, Red = failed.")
+    else:
+        st.info("No Executor results for this run yet.")
 
 
 def _render_obs_kpi_metrics():
@@ -2472,11 +2564,10 @@ def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> s
     import requests as _req
 
     db = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
-    agent_id = f"{db}.AGENT_FRAMEWORK.{agent_name}"
     messages = list(history or []) + [
         {"role": "user", "content": [{"type": "text", "text": message}]}
     ]
-    payload = {"model": agent_id, "messages": messages}
+    payload = {"messages": messages}
 
     def _parse_agent_response(data) -> str | None:
         if isinstance(data, list):
@@ -2498,23 +2589,43 @@ def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> s
                 return "\n".join(texts) if texts else None
         return None
 
-    # ── Path 1: Container runtime — full REST with session token ──────────────
+    # ── Path 1: Container runtime — object-based agent endpoint ──────────────
     try:
         conn  = session.connection
         host  = conn.host
-        token = conn.rest.token  # Works in container runtime, not warehouse runtime
+        token = conn.rest.token
+        url   = f"https://{host}/api/v2/databases/{db}/schemas/AGENT_FRAMEWORK/agents/{agent_name}:run"
         resp  = _req.post(
-            f"https://{host}/api/v2/cortex/agent:run",
+            url,
             headers={"Authorization": f'Snowflake Token="{token}"',
-                     "Content-Type": "application/json", "Accept": "application/json"},
-            json=payload, timeout=120,
+                     "Content-Type": "application/json",
+                     "Accept": "text/event-stream"},
+            json=payload, stream=True, timeout=120, verify=False,
         )
         if resp.status_code == 200:
-            body = resp.json()
-            result = _parse_agent_response(body)
-            if result:
-                return result
-        agent_error = f"{resp.status_code}: {resp.text[:200]}"
+            text_chunks = []
+            event_type  = None
+            for line in resp.iter_lines():
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8")
+                if line.startswith("event: "):
+                    event_type = line[7:].strip()
+                elif line.startswith("data: "):
+                    try:
+                        data = _json.loads(line[6:])
+                    except Exception:
+                        continue
+                    if event_type == "response.text.delta":
+                        chunk = data.get("text", "")
+                        if chunk:
+                            text_chunks.append(chunk)
+                    elif event_type == "done":
+                        break
+            if text_chunks:
+                return "".join(text_chunks)
+            agent_error = f"200 but no text chunks. url={url}"
+        else:
+            agent_error = f"{resp.status_code}: url={url} {resp.text[:300]}"
     except Exception as e:
         agent_error = str(e)
 
@@ -2557,7 +2668,7 @@ def _call_cortex_agent(agent_name: str, message: str, history: list = None) -> s
             "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.3-70b', ?)", params=[prompt]
         ).collect()
         reply = str(rows[0][0]) if rows else "No response."
-        return f"*(via CORTEX.COMPLETE — Agents API not available in this runtime)*\n\n{reply}"
+        return f"*(via CORTEX.COMPLETE — Agents API error: `{agent_error}`)*\n\n{reply}"
     except Exception as e:
         return f"All paths failed. Last error: {agent_error}\nCOMPLETE error: {e}"
 
