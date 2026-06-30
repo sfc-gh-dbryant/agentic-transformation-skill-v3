@@ -58,6 +58,11 @@ DECLARE
     col_list            VARCHAR;
     pk_columns          VARCHAR;   -- for deterministic fast path
     fast_path_used      BOOLEAN DEFAULT FALSE;
+    conflict_fallback_schema VARCHAR;  -- redirect target for object-type conflicts
+    effective_target_fqn     VARCHAR;  -- may differ from target_fqn on redirect
+    obj_type                 VARCHAR;  -- TABLE_TYPE from INFORMATION_SCHEMA
+    obj_is_dynamic           INTEGER DEFAULT 0; -- 1 if target is a DYNAMIC TABLE
+    conflict_redirected      BOOLEAN DEFAULT FALSE;
 BEGIN
     SELECT primary_model INTO :active_model
     FROM AGENT_FRAMEWORK.MODEL_CONFIG
@@ -70,13 +75,20 @@ BEGIN
            COALESCE(NULLIF(output_schema, ''), 'AGENT_FRAMEWORK_OUTPUT'),
            COALESCE(dry_run, TRUE),
            COALESCE(overwrite_existing, FALSE),
-           COALESCE(brownfield_mode, FALSE)
-    INTO :pipeline_type, :target_lag, :output_schema, :is_dry_run, :allow_overwrite, :brownfield_mode
+           COALESCE(brownfield_mode, FALSE),
+           conflict_fallback_schema
+    INTO :pipeline_type, :target_lag, :output_schema, :is_dry_run, :allow_overwrite, :brownfield_mode, :conflict_fallback_schema
     FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT
     WHERE context_id = 1;
 
-    -- Safety: ensure the output schema exists before any execution attempt
+    -- Resolve fallback schema: explicit config or auto-derive as output_schema_STAGING
+    IF (:conflict_fallback_schema IS NULL OR :conflict_fallback_schema = '') THEN
+        conflict_fallback_schema := :output_schema || '_STAGING';
+    END IF;
+
+    -- Safety: ensure both output schema and fallback schema exist
     EXECUTE IMMEDIATE 'CREATE SCHEMA IF NOT EXISTS ' || :output_schema;
+    EXECUTE IMMEDIATE 'CREATE SCHEMA IF NOT EXISTS ' || :conflict_fallback_schema;
 
     UPDATE AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS
     SET status = 'EXECUTING', current_phase = 'EXECUTOR'
@@ -161,6 +173,61 @@ OUTPUT RULES (CRITICAL):
         target_table_name := SPLIT_PART(:cur_source_table, '.', -1);
         target_fqn        := :output_schema || '.' || :target_table_name;
 
+        -- [P0-0] Object-type conflict check: redirect if target is a VIEW,
+        --        DYNAMIC TABLE, or an empty regular table owned by another pipeline.
+        --        Redirected tables are written to conflict_fallback_schema.
+        conflict_redirected := FALSE;
+        obj_type            := 'NOT_FOUND';
+        obj_is_dynamic      := 0;
+
+        BEGIN
+            LET ot_rs RESULTSET := (EXECUTE IMMEDIATE
+                'SELECT COALESCE(MAX(TABLE_TYPE),''NOT_FOUND'') FROM INFORMATION_SCHEMA.TABLES ' ||
+                'WHERE UPPER(TABLE_SCHEMA) = UPPER(SPLIT_PART(''' || :output_schema || ''',''.'',-1)) ' ||
+                'AND   UPPER(TABLE_NAME)   = UPPER(''' || :target_table_name || ''')');
+            LET ot_cur CURSOR FOR ot_rs;
+            OPEN ot_cur; FETCH ot_cur INTO obj_type; CLOSE ot_cur;
+        EXCEPTION WHEN OTHER THEN
+            obj_type := 'NOT_FOUND';
+        END;
+
+        IF (obj_type = 'VIEW') THEN
+            -- Target is a VIEW — always redirect
+            conflict_redirected := TRUE;
+        ELSEIF (obj_type NOT IN ('NOT_FOUND')) THEN
+            -- Target exists as a table — check if it is a Dynamic Table
+            BEGIN
+                LET dt_rs RESULTSET := (EXECUTE IMMEDIATE
+                    'SELECT COUNT(*) FROM INFORMATION_SCHEMA.DYNAMIC_TABLES ' ||
+                    'WHERE UPPER(TABLE_SCHEMA) = UPPER(SPLIT_PART(''' || :output_schema || ''',''.'',-1)) ' ||
+                    'AND   UPPER(TABLE_NAME)   = UPPER(''' || :target_table_name || ''')');
+                LET dt_cur CURSOR FOR dt_rs;
+                OPEN dt_cur; FETCH dt_cur INTO obj_is_dynamic; CLOSE dt_cur;
+            EXCEPTION WHEN OTHER THEN
+                obj_is_dynamic := 0;
+            END;
+            IF (obj_is_dynamic > 0) THEN
+                -- Target is a DYNAMIC TABLE — always redirect
+                conflict_redirected := TRUE;
+            ELSEIF (existing_row_count = 0 AND NOT :allow_overwrite) THEN
+                -- Target is a regular table with 0 rows — may belong to another pipeline
+                conflict_redirected := TRUE;
+            END IF;
+        END IF;
+
+        IF (conflict_redirected) THEN
+            effective_target_fqn := :conflict_fallback_schema || '.' || :target_table_name;
+            INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
+            SELECT :execution_id, 'EXECUTOR', 'REDIRECTED',
+                   :target_fqn || ' conflict (' ||
+                   CASE WHEN obj_type = 'VIEW'   THEN 'VIEW'
+                        WHEN obj_is_dynamic > 0  THEN 'DYNAMIC TABLE'
+                        ELSE 'EMPTY TABLE — possible pipeline ownership'
+                   END || ') → redirected to ' || :effective_target_fqn;
+        ELSE
+            effective_target_fqn := :target_fqn;
+        END IF;
+
         -- [P0-1] Existence check: abort if target has rows and overwrite is disabled
         existing_row_count := 0;
         BEGIN
@@ -240,7 +307,7 @@ OUTPUT RULES (CRITICAL):
                 IF (cur_strategy IN ('direct_select', 'passthrough')) THEN
                     -- Pure pass-through: select all columns, apply basic type hygiene
                     generated_sql :=
-                        'CREATE OR REPLACE TABLE ' || target_fqn || ' AS ' ||
+                        'CREATE OR REPLACE TABLE ' || effective_target_fqn || ' AS ' ||
                         'SELECT ' || col_list || ' ' ||
                         'FROM ' || cur_source_table;
                     fast_path_used := TRUE;
@@ -248,7 +315,7 @@ OUTPUT RULES (CRITICAL):
                 ELSEIF (cur_strategy = 'deduplicate' AND pk_columns IS NOT NULL AND LENGTH(pk_columns) > 0) THEN
                     -- ROW_NUMBER dedup: latest row per PK, filter soft-deletes
                     generated_sql :=
-                        'CREATE OR REPLACE TABLE ' || target_fqn || ' AS ' ||
+                        'CREATE OR REPLACE TABLE ' || effective_target_fqn || ' AS ' ||
                         'WITH ranked AS (' ||
                         '  SELECT ' || col_list || ',' ||
                         '    ROW_NUMBER() OVER (' ||
@@ -269,7 +336,7 @@ OUTPUT RULES (CRITICAL):
         IF (fast_path_used) THEN
             INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
             SELECT :execution_id, 'EXECUTOR', 'FAST_PATH',
-                   SPLIT_PART(:cur_source_table, '.', -1) || ' -> ' || :target_fqn ||
+                   SPLIT_PART(:cur_source_table, '.', -1) || ' -> ' || :effective_target_fqn ||
                    ' (deterministic, no LLM, strategy=' || :cur_strategy || ')';
         END IF;
 
@@ -286,7 +353,7 @@ These are the ONLY valid column names for this table. Every column in your SELEC
     ' || REPLACE(col_list, ', ', chr(10) || '    ') || '
 
 [HARD RULE] Do NOT use any column name not in the list above. Do NOT invent names.
-[HARD RULE] Do NOT use TRY_CAST(x AS VARCHAR). Use TRY_TO_VARCHAR(x) instead.
+[HARD RULE] Do NOT use TRY_TO_VARCHAR() - it does not exist in Snowflake. Use TO_VARCHAR(x) for any value-to-string conversion.
 [HARD RULE] The SELECT list must only contain real column names or expressions over real column names.
 
 PLANNED TRANSFORMATIONS: ' || cur_actions || '
@@ -360,7 +427,7 @@ DIRECTIVES:
                     dry_run_count := dry_run_count + 1;
                     INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
                     SELECT :execution_id, 'EXECUTOR', 'DRY_RUN',
-                           '[DRY RUN] ' || :target_fqn ||
+                           '[DRY RUN] ' || :effective_target_fqn ||
                            ' — DDL generated, NOT executed. Set dry_run=>FALSE to run.' ||
                            chr(10) || LEFT(:generated_sql, 2000);
                 ELSE
@@ -370,7 +437,7 @@ DIRECTIVES:
 
                     UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
                     SET silver_table      = SPLIT_PART(TRIM(REGEXP_SUBSTR(:generated_sql, 'TABLE\\s+([\\w\\.]+)', 1, 1, 'ie', 1)), '.', -1),
-                        silver_schema     = :output_schema,
+                        silver_schema     = SPLIT_PART(:effective_target_fqn, '.', -2),
                         silver_status     = 'COMPLETE',
                         last_execution_id = :execution_id,
                         last_refreshed_at = CURRENT_TIMESTAMP(),
@@ -379,9 +446,10 @@ DIRECTIVES:
 
                     INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
                     SELECT :execution_id, 'EXECUTOR', 'OK',
-                           SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :target_fqn ||
+                           SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :effective_target_fqn ||
                            ' built as ' || :pipeline_type ||
-                           ' (retries=' || :retry_count::VARCHAR || ')';
+                           ' (retries=' || :retry_count::VARCHAR || ')' ||
+                           CASE WHEN conflict_redirected THEN ' [REDIRECTED from ' || :target_fqn || ']' ELSE '' END;
                 END IF;
 
             EXCEPTION WHEN OTHER THEN
@@ -402,7 +470,7 @@ DIRECTIVES:
                     dry_run_count := dry_run_count + 1;
                     INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
                     SELECT :execution_id, 'EXECUTOR', 'DRY_RUN',
-                           '[DRY RUN / FAST PATH] ' || :target_fqn ||
+                           '[DRY RUN / FAST PATH] ' || :effective_target_fqn ||
                            ' — deterministic DDL generated, NOT executed.' ||
                            chr(10) || LEFT(:generated_sql, 2000);
                 ELSE
@@ -411,7 +479,7 @@ DIRECTIVES:
                     success_count := success_count + 1;
                     UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
                     SET silver_table      = :target_table_name,
-                        silver_schema     = :output_schema,
+                        silver_schema     = SPLIT_PART(:effective_target_fqn, '.', -2),
                         silver_status     = 'COMPLETE',
                         last_execution_id = :execution_id,
                         last_refreshed_at = CURRENT_TIMESTAMP(),
@@ -419,8 +487,9 @@ DIRECTIVES:
                     WHERE bronze_table = SPLIT_PART(:cur_source_table, '.', -1);
                     INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
                     SELECT :execution_id, 'EXECUTOR', 'OK',
-                           SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :target_fqn ||
-                           ' built via fast path (strategy=' || :cur_strategy || ')';
+                           SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :effective_target_fqn ||
+                           ' built via fast path (strategy=' || :cur_strategy || ')' ||
+                           CASE WHEN conflict_redirected THEN ' [REDIRECTED from ' || :target_fqn || ']' ELSE '' END;
                 END IF;
             EXCEPTION WHEN OTHER THEN
                 -- Fast path DDL failed — log and mark as failed (no retry for deterministic DDL)

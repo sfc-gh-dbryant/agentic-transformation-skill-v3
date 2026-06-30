@@ -30,10 +30,13 @@ BEGIN
         ''data_type'',   DATA_TYPE,
         ''ordinal'',     ORDINAL_POSITION,
         ''nullable'',    IS_NULLABLE
-    ) ORDER BY ORDINAL_POSITION) AS cols
-    FROM ' || :db || '.INFORMATION_SCHEMA.COLUMNS
-    WHERE UPPER(TABLE_SCHEMA) = UPPER(''' || :schema || ''')
-      AND UPPER(TABLE_NAME)   = UPPER(''' || :tbl    || ''')';
+    )) AS cols
+    FROM (SELECT COLUMN_NAME, DATA_TYPE, ORDINAL_POSITION, IS_NULLABLE
+          FROM ' || :db || '.INFORMATION_SCHEMA.COLUMNS
+          WHERE UPPER(TABLE_SCHEMA) = UPPER(''' || :schema || ''')
+            AND UPPER(TABLE_NAME)   = UPPER(''' || :tbl    || ''')
+          ORDER BY ORDINAL_POSITION)
+    sub';
     LET rs  RESULTSET := (EXECUTE IMMEDIATE :col_sql);
     LET cur CURSOR FOR rs;
     OPEN cur;
@@ -58,7 +61,7 @@ import json
 def run(session, fqn: str, n: int) -> str:
     try:
         rows = session.sql(f"SELECT * FROM {fqn} LIMIT {min(n, 20)}").collect()
-        return json.dumps({"fqn": fqn, "rows": [dict(zip(r.__fields__, r)) for r in rows]}, default=str)
+        return json.dumps({"fqn": fqn, "rows": [r.as_dict() for r in rows]}, default=str)
     except Exception as e:
         return json.dumps({"fqn": fqn, "error": str(e)})
 $$;
@@ -139,13 +142,13 @@ import json
 
 def run(session, layer: str) -> str:
     rows = session.sql(
-        "SELECT rule_name, rule_text, severity FROM AGENT_FRAMEWORK.SCHEMA_CONTRACTS "
+        "SELECT rule_name, rule_value, rule_category FROM AGENT_FRAMEWORK.SCHEMA_CONTRACTS "
         "WHERE is_active = TRUE AND (UPPER(applies_to_layer) = UPPER(?) OR applies_to_layer IS NULL) "
-        "ORDER BY priority ASC",
+        "ORDER BY rule_category ASC",
         params=[layer]
     ).collect()
     return json.dumps({"layer": layer, "contracts": [
-        {"rule": r["RULE_NAME"], "text": r["RULE_TEXT"], "severity": r["SEVERITY"]}
+        {"rule": r["RULE_NAME"], "text": r["RULE_VALUE"], "category": r["RULE_CATEGORY"]}
         for r in rows
     ]})
 $$;
@@ -162,13 +165,13 @@ import json
 
 def run(session, table_pattern: str) -> str:
     rows = session.sql(
-        "SELECT use_case, table_pattern, transformation_instructions, priority "
+        "SELECT use_case, source_table_pattern, instructions, priority "
         "FROM AGENT_FRAMEWORK.ACTIVE_DIRECTIVES "
-        "WHERE UPPER(?) LIKE UPPER(table_pattern) ORDER BY priority ASC",
+        "WHERE UPPER(?) LIKE UPPER(source_table_pattern) ORDER BY priority ASC",
         params=[table_pattern]
     ).collect()
     return json.dumps({"table_pattern": table_pattern, "directives": [
-        {"use_case": r["USE_CASE"], "instructions": r["TRANSFORMATION_INSTRUCTIONS"],
+        {"use_case": r["USE_CASE"], "instructions": r["INSTRUCTIONS"],
          "priority": r["PRIORITY"]}
         for r in rows
     ]})
@@ -397,7 +400,7 @@ def run(session, fqn: str, n: int) -> str:
     try:
         rows = session.sql(f"SELECT * FROM {fqn} LIMIT {min(n, 10)}").collect()
         return json.dumps({"fqn": fqn, "sample_rows": [
-            dict(zip(r.__fields__, r)) for r in rows], "count": len(rows)}, default=str)
+            dict(r.as_dict()) for r in rows], "count": len(rows)}, default=str)
     except Exception as e:
         return json.dumps({"fqn": fqn, "error": str(e)})
 $$;
@@ -517,10 +520,87 @@ def run(session, fqn: str, where_clause: str) -> str:
         sql = f"SELECT * FROM {fqn} WHERE {where_clause} LIMIT 10"
         rows = session.sql(sql).collect()
         return json.dumps({"fqn": fqn, "where": where_clause,
-                           "rows": [dict(zip(r.__fields__, r)) for r in rows],
+                           "rows": [r.as_dict() for r in rows],
                            "count": len(rows)}, default=str)
     except Exception as e:
         return json.dumps({"fqn": fqn, "where": where_clause, "error": str(e)})
+$$;
+
+CREATE OR REPLACE PROCEDURE AGENT_FRAMEWORK.ATS_TOOL_SAVE_PLANNER_DECISION(
+    execution_id         VARCHAR,
+    source_table         VARCHAR,
+    transformation_strategy VARCHAR,
+    pk_columns           VARCHAR,
+    recommended_actions  VARCHAR,
+    llm_reasoning        VARCHAR,
+    confidence_score     FLOAT
+)
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'run'
+AS
+$$
+import json, hashlib
+
+def run(session, execution_id, source_table, transformation_strategy,
+        pk_columns, recommended_actions, llm_reasoning, confidence_score):
+    try:
+        import uuid
+        decision_id = str(uuid.uuid4())
+
+        model_row = session.sql(
+            "SELECT primary_model FROM AGENT_FRAMEWORK.MODEL_CONFIG WHERE config_key='default' LIMIT 1"
+        ).collect()
+        model_used = model_row[0][0] if model_row else 'agent'
+
+        ctx_row = session.sql(
+            "SELECT COALESCE(NULLIF(output_schema,''),'AGENT_FRAMEWORK_OUTPUT') "
+            "FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT WHERE context_id=1"
+        ).collect()
+        target_schema = ctx_row[0][0] if ctx_row else 'AGENT_FRAMEWORK_OUTPUT'
+
+        fingerprint = hashlib.md5(
+            (source_table + transformation_strategy + (pk_columns or '')).encode()
+        ).hexdigest()
+
+        session.sql(f"""
+            INSERT INTO AGENT_FRAMEWORK.PLANNER_DECISIONS
+                (decision_id, execution_id, source_table, target_schema,
+                 transformation_strategy, recommended_actions, priority,
+                 llm_reasoning, pk_columns, confidence_score,
+                 model_used, schema_fingerprint)
+            SELECT
+                '{decision_id}',
+                '{execution_id}',
+                '{source_table}',
+                '{target_schema}',
+                '{transformation_strategy}',
+                PARSE_JSON('{json.dumps(recommended_actions).replace("'", "''")}'),
+                1,
+                '{(llm_reasoning or '').replace("'", "''")}',
+                '{(pk_columns or 'unknown')}',
+                {float(confidence_score) if confidence_score else 0.7},
+                '{model_used}',
+                '{fingerprint}'
+        """).collect()
+
+        session.sql(f"""
+            UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
+            SET silver_status = 'PLANNED', updated_at = CURRENT_TIMESTAMP()
+            WHERE UPPER(bronze_table) = UPPER(SPLIT_PART('{source_table}', '.', -1))
+        """).collect()
+
+        return json.dumps({
+            "status": "SAVED",
+            "decision_id": decision_id,
+            "source_table": source_table,
+            "strategy": transformation_strategy,
+            "pk_columns": pk_columns
+        })
+    except Exception as e:
+        return json.dumps({"status": "ERROR", "error": str(e)[:400]})
 $$;
 
 CREATE OR REPLACE PROCEDURE AGENT_FRAMEWORK.ATS_TOOL_GET_PLANNER_DECISION(

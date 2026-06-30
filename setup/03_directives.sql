@@ -104,7 +104,7 @@ BEGIN
 - NEVER use a date or timestamp column (e.g. DAY_DATE, CREATED_AT, UPDATED_AT) as the primary dedup key unless there is NO _KEY or _ID column in the table
 - If multiple _ID or _KEY columns exist, prefer the one whose name most closely matches the table name (e.g. CALENDAR_KEY for a CALENDAR table)
 - When in doubt, deduplicate on the column with the highest cardinality relative to total row count
-- Use TRY_TO_VARCHAR() for any numeric-to-string conversion. Do NOT use TRY_CAST(x AS VARCHAR).',
+- Use TO_VARCHAR(x) for any numeric-to-string conversion. For dates/timestamps use TO_VARCHAR(x, ''YYYY-MM-DD''). Do NOT use TRY_TO_VARCHAR() — it does not exist in Snowflake.',
          6),
 
         -- ── Master dimension tables — SCD Type 2 ──────────────────────────────
