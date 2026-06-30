@@ -385,15 +385,24 @@ DIRECTIVES:
                 generated_sql := TRIM(SPLIT_PART(generated_sql, ';', 1));
 
                 -- [P0-2a-0] Fast guard: catch known hallucinated framework variable names
-                -- before the full column parser runs (which can fail silently)
-                IF (CONTAINS(UPPER(:generated_sql), 'CONFLICT_REDIRECTED') OR
-                    CONTAINS(UPPER(:generated_sql), 'EFFECTIVE_TARGET_FQN')) THEN
-                    last_error  := 'Generated SQL contains internal framework variable name (CONFLICT_REDIRECTED / EFFECTIVE_TARGET_FQN). These are not source columns. Use only columns from the authoritative list.';
+                -- Use SELECT INTO for reliable variable binding in Snowflake SQL Scripting
+                LET conflict_guard INTEGER DEFAULT 0;
+                BEGIN
+                    SELECT CASE WHEN UPPER(:generated_sql) LIKE '%CONFLICT_REDIRECTED%'
+                                  OR UPPER(:generated_sql) LIKE '%EFFECTIVE_TARGET_FQN%'
+                               THEN 1 ELSE 0 END
+                    INTO :conflict_guard
+                    FROM (SELECT 1) t;
+                EXCEPTION WHEN OTHER THEN
+                    conflict_guard := 0;
+                END;
+                IF (conflict_guard > 0) THEN
+                    last_error  := 'Generated SQL contains internal framework variable name (CONFLICT_REDIRECTED / EFFECTIVE_TARGET_FQN). Use only columns from the authoritative list.';
                     retry_count := retry_count + 1;
                     INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
                     SELECT :execution_id, 'EXECUTOR', 'RETRY',
                            SPLIT_PART(:cur_source_table, '.', -1) || ' attempt ' || :retry_count::VARCHAR ||
-                           ' failed (framework variable in DDL): ' || LEFT(:last_error, 200);
+                           ' blocked (framework variable in DDL): ' || LEFT(:last_error, 200);
                     CONTINUE;
                 END IF;
 
@@ -462,7 +471,7 @@ DIRECTIVES:
                            SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :effective_target_fqn ||
                            ' built as ' || :pipeline_type ||
                            ' (retries=' || :retry_count::VARCHAR || ')' ||
-                           CASE WHEN conflict_redirected THEN ' [REDIRECTED from ' || :target_fqn || ']' ELSE '' END;
+                           CASE WHEN :conflict_redirected THEN ' [REDIRECTED from ' || :target_fqn || ']' ELSE '' END;
                 END IF;
 
             EXCEPTION WHEN OTHER THEN
@@ -502,7 +511,7 @@ DIRECTIVES:
                     SELECT :execution_id, 'EXECUTOR', 'OK',
                            SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :effective_target_fqn ||
                            ' built via fast path (strategy=' || :cur_strategy || ')' ||
-                           CASE WHEN conflict_redirected THEN ' [REDIRECTED from ' || :target_fqn || ']' ELSE '' END;
+                           CASE WHEN :conflict_redirected THEN ' [REDIRECTED from ' || :target_fqn || ']' ELSE '' END;
                 END IF;
             EXCEPTION WHEN OTHER THEN
                 -- Fast path DDL failed — log and mark as failed (no retry for deterministic DDL)
