@@ -354,6 +354,7 @@ These are the ONLY valid column names for this table. Every column in your SELEC
 
 [HARD RULE] Do NOT use any column name not in the list above. Do NOT invent names.
 [HARD RULE] Do NOT use TRY_TO_VARCHAR() - it does not exist in Snowflake. Use TO_VARCHAR(x) for any value-to-string conversion.
+[HARD RULE] Do NOT reference CONFLICT_REDIRECTED, EFFECTIVE_TARGET_FQN, or any other internal framework variable as a column name. These are execution-context variables, not source columns.
 [HARD RULE] The SELECT list must only contain real column names or expressions over real column names.
 
 PLANNED TRANSFORMATIONS: ' || cur_actions || '
