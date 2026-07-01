@@ -105,6 +105,21 @@ run_script() {
     rm -f "${tmpfile}"
 }
 
+# Optional scripts: failures are warnings, not blockers
+run_script_optional() {
+    local script="$1"
+    local tmpfile
+    tmpfile=$(mktemp /tmp/deploy_XXXXX.sql)
+    printf '%s\n' "${SET_VARS}" > "${tmpfile}"
+    cat "${SCRIPT_DIR}/${script}" >> "${tmpfile}"
+    if snow sql -c "${CONNECTION}" -f "${tmpfile}" 2>&1; then
+        echo "✓  $script complete"
+    else
+        echo "⚠  $script failed (optional — skipping). Deploy the Streamlit app and use Tab 10/11/12 to retry."
+    fi
+    rm -f "${tmpfile}"
+}
+
 # ---------------------------------------------------------------------------
 # Run setup scripts in order
 # ---------------------------------------------------------------------------
@@ -125,6 +140,9 @@ SCRIPTS=(
     "07_pipeline_context.sql"
     "08_dcm_export.sql"
     "09_banner_config.sql"
+)
+
+OPTIONAL_SCRIPTS=(
     "10_cortex_search.sql"
     "11_semantic_view.sql"
     "12_document_ingestion.sql"
@@ -134,6 +152,13 @@ for script in "${SCRIPTS[@]}"; do
     echo "▶  Running $script ..."
     run_script "${script}"
     echo "✓  $script complete"
+    echo ""
+done
+
+echo "▶  Running optional enhancement scripts (10-12)..."
+for script in "${OPTIONAL_SCRIPTS[@]}"; do
+    echo "▶  Running $script ..."
+    run_script_optional "${script}"
     echo ""
 done
 

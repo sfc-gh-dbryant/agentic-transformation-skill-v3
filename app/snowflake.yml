@@ -7,22 +7,8 @@ entities:
       schema: AGENT_FRAMEWORK
       database: ATS_V3
     title: "Agentic Transformation Skill v3"
-    query_warehouse: COMPUTE_WH
+    query_warehouse: DBRYANT_COCO_WH_S
     main_file: streamlit_app.py
     artifacts:
       - streamlit_app.py
       - environment.yml
-  agentic_transformation_skill_v4:
-    type: streamlit
-    identifier:
-      name: AGENTIC_TRANSFORMATION_SKILL_V4
-      schema: AGENT_FRAMEWORK
-      database: ATS_V4
-    title: "Agentic Transformation Skill v4"
-    query_warehouse: COMPUTE_WH
-    main_file: streamlit_app_v4.py
-    runtime_name: SYSTEM$ST_CONTAINER_RUNTIME_PY3_11
-    compute_pool: ATS_STREAMLIT_POOL
-    artifacts:
-      - streamlit_app_v4.py
-      - requirements.txt
