@@ -69,11 +69,15 @@ def run(session, project_name='adf_pipeline', data_engineer_role='DATA_ENGINEER_
 
     # ── Column metadata ───────────────────────────────────────────────────────
     def get_columns(schema, table):
+        # schema may be 'DB.SCHEMA' (cross-db) or plain 'SCHEMA'
+        parts = schema.split('.')
+        info_db     = parts[0] if len(parts) > 1 else db
+        schema_only = parts[-1]
         rows = session.sql(f"""
             SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH,
                    NUMERIC_PRECISION, NUMERIC_SCALE
-            FROM {db}.INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = '{schema}' AND TABLE_NAME = '{table}'
+            FROM {info_db}.INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = '{schema_only}' AND TABLE_NAME = '{table}'
             ORDER BY ORDINAL_POSITION
         """).collect()
         return rows
