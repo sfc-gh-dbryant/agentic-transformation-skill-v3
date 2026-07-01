@@ -157,15 +157,72 @@ def get_silver_metadata(session, current_db: str, silver_schema: str, silver_tab
     directives_ctx = '\n'.join(r[0] for r in dir_rows) if dir_rows else ''
     return columns_list, directives_ctx
 
+DATA_VAULT_INSTRUCTIONS = """
+DATA VAULT 2.0 PATTERN — generate three separate CREATE TABLE statements:
+
+1. HUB table ({gold_name_hub}):
+   - Hash key column: <TABLE>_HK BINARY(32) as SHA2_BINARY(business_key_columns)
+   - Business key column(s) from AVAILABLE COLUMNS
+   - LOAD_DTS TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+   - RECORD_SOURCE VARCHAR DEFAULT 'ATS'
+   - PRIMARY KEY on <TABLE>_HK
+
+2. SATELLITE table ({gold_name_sat}):
+   - <TABLE>_HK BINARY(32) (FK to Hub)
+   - LOAD_DTS TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+   - HASHDIFF BINARY(32) as SHA2_BINARY of all descriptive columns
+   - All remaining descriptive columns from AVAILABLE COLUMNS
+   - PRIMARY KEY on (<TABLE>_HK, LOAD_DTS)
+
+3. For each clear foreign-key relationship found in AVAILABLE COLUMNS, a LINK table:
+   - <TABLE_A>_<TABLE_B>_LNK with both HK columns + LOAD_DTS + RECORD_SOURCE
+   (skip if no FK relationships obvious)
+
+Use ONLY columns from AVAILABLE COLUMNS. No invented columns.
+Separate each CREATE TABLE with a semicolon.
+"""
+
 def build_gold_prompt(silver_fqn: str, columns_list: str, contracts_ctx: str,
                       directives_ctx: str, gold_name: str,
-                      is_dt: bool, target_lag: str, active_wh: str) -> str:
+                      is_dt: bool, target_lag: str, active_wh: str,
+                      gold_output_mode: str = 'FLAT') -> str:
     fallback_directive = 'Build a clean analytical view with derived metrics'
     base = (
         f"SILVER TABLE: {silver_fqn}\n"
         f"AVAILABLE COLUMNS (use ONLY these, never invent others):\n{columns_list}\n\n"
         f"SCHEMA CONTRACTS:\n{contracts_ctx or 'None'}\n\n"
         f"DIRECTIVES:\n{directives_ctx or fallback_directive}\n\n"
+    )
+
+    if gold_output_mode == 'DATA_VAULT':
+        tbl_base = gold_name.replace('_ANALYTICS', '')
+        gold_name_hub = tbl_base + '_HUB'
+        gold_name_sat = tbl_base + '_SAT'
+        dv_instructions = DATA_VAULT_INSTRUCTIONS.format(
+            gold_name_hub=gold_name_hub, gold_name_sat=gold_name_sat
+        )
+        return (
+            f"You are a Snowflake SQL expert building Data Vault 2.0 tables.\n\n{base}"
+            f"{dv_instructions}\n"
+            f"OUTPUT: Raw Snowflake SQL only — no markdown fences, no explanations.\n"
+            f"Generate the Hub, Satellite, and optionally Link CREATE TABLE statements "
+            f"for source table: {silver_fqn}"
+        )
+
+    if gold_output_mode == 'STAR_SCHEMA':
+        return (
+            f"You are a Snowflake SQL expert building a Star Schema Gold layer.\n\n{base}"
+            f"REQUIREMENTS:\n"
+            f"1. Create a FACT table ({gold_name}) with numeric measures and FK surrogate keys.\n"
+            f"2. Create one DIMENSION table per logical entity (e.g. DIM_PRODUCT, DIM_DATE).\n"
+            f"3. Use ONLY columns from AVAILABLE COLUMNS above.\n"
+            f"4. Use ASCII operators: <= not ≤, >= not ≥.\n"
+            f"5. Separate each CREATE TABLE with a semicolon.\n\n"
+            f"OUTPUT: Raw Snowflake SQL only — no markdown fences, no explanations."
+        )
+
+    # Default: FLAT or ONE_BIG_TABLE
+    requirements = (
         f"REQUIREMENTS:\n"
         f"1. Never use SELECT * — explicitly list every column by name.\n"
         f"2. Include at least 3 derived columns (DATEDIFF, CASE WHEN, COALESCE, arithmetic).\n"
@@ -175,7 +232,7 @@ def build_gold_prompt(silver_fqn: str, columns_list: str, contracts_ctx: str,
     )
     if is_dt:
         return (
-            f"You are a Snowflake SQL expert building Gold analytical Dynamic Tables.\n\n{base}"
+            f"You are a Snowflake SQL expert building Gold analytical Dynamic Tables.\n\n{base}{requirements}"
             f"6. CLUSTER BY goes inside the CREATE statement before AS, not in a separate ALTER.\n"
             f"7. Do NOT end with a semicolon.\n\n"
             f"OUTPUT: A single raw Snowflake SQL statement — no markdown, no explanation.\n"
@@ -186,7 +243,7 @@ def build_gold_prompt(silver_fqn: str, columns_list: str, contracts_ctx: str,
             f"AS SELECT ... FROM {silver_fqn}"
         )
     return (
-        f"You are a Snowflake SQL expert building Gold analytical tables.\n\n{base}"
+        f"You are a Snowflake SQL expert building Gold analytical tables.\n\n{base}{requirements}"
         f"6. CLUSTER BY must be in a separate ALTER TABLE statement after the CREATE.\n\n"
         f"OUTPUT: Raw Snowflake SQL only — no markdown fences, no explanations.\n"
         f"Statement 1: CREATE OR REPLACE TABLE {gold_name} AS SELECT ... FROM {silver_fqn}\n"
@@ -207,12 +264,14 @@ def run(session, dry_run=True, max_tables=10):
     active_wh    = session.sql("SELECT CURRENT_WAREHOUSE()").collect()[0][0]
 
     ctx_rows      = session.sql(
-        "SELECT COALESCE(pipeline_type,'CTAS'), COALESCE(target_lag,'1 hour') "
+        "SELECT COALESCE(pipeline_type,'CTAS'), COALESCE(target_lag,'1 hour'), "
+        "COALESCE(gold_output_mode,'FLAT') "
         "FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT WHERE context_id = 1"
     ).collect()
-    pipeline_type = ctx_rows[0][0] if ctx_rows else 'CTAS'
-    target_lag    = ctx_rows[0][1] if ctx_rows else '1 hour'
-    is_dt         = (pipeline_type == 'DYNAMIC_TABLE')
+    pipeline_type    = ctx_rows[0][0] if ctx_rows else 'CTAS'
+    target_lag       = ctx_rows[0][1] if ctx_rows else '1 hour'
+    gold_output_mode = ctx_rows[0][2] if ctx_rows else 'FLAT'
+    is_dt            = (pipeline_type == 'DYNAMIC_TABLE')
 
     contracts_ctx = (session.sql(
         "SELECT AGENT_FRAMEWORK.CONTRACTS_AS_PROMPT_CONTEXT('GOLD')"
@@ -246,7 +305,8 @@ def run(session, dry_run=True, max_tables=10):
         columns_list, directives_ctx = get_silver_metadata(session, current_db, silver_schema, silver_table)
 
         prompt = build_gold_prompt(silver_fqn, columns_list, contracts_ctx,
-                                   directives_ctx, gold_name, is_dt, target_lag, active_wh)
+                                   directives_ctx, gold_name, is_dt, target_lag, active_wh,
+                                   gold_output_mode)
         prompt_escaped = prompt.replace("'", "''")
         llm_rows = session.sql(
             f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{active_model}', '{prompt_escaped}')"
