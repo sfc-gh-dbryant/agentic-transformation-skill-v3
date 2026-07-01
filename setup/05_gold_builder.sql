@@ -126,11 +126,15 @@ AS $$
 import re, json
 
 def get_silver_metadata(session, current_db: str, silver_schema: str, silver_table: str) -> tuple:
+    # silver_schema may be 'DB.SCHEMA' (cross-db) or plain 'SCHEMA'
+    parts = silver_schema.split('.')
+    info_db     = parts[0] if len(parts) > 1 else current_db
+    schema_only = parts[-1]
     col_rows = session.sql(f"""
         SELECT LISTAGG(COLUMN_NAME || ' (' || DATA_TYPE || ')', ', ')
             WITHIN GROUP (ORDER BY ORDINAL_POSITION)
-        FROM {current_db}.INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = UPPER('{silver_schema}')
+        FROM {info_db}.INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = UPPER('{schema_only}')
           AND TABLE_NAME   = UPPER('{silver_table}')
     """).collect()
     columns_list = col_rows[0][0] if col_rows and col_rows[0][0] else 'unknown'
@@ -218,8 +222,18 @@ def run(session, dry_run=True, max_tables=10):
     for row in gaps_rows:
         silver_table  = row[0]
         silver_schema = row[1]
-        silver_fqn    = f"{current_db}.{silver_schema}.{silver_table}"
-        gold_name     = f"GOLD.{silver_table}_ANALYTICS"
+        # silver_schema may be 'DB.SCHEMA' — use as-is, don't prepend current_db
+        silver_fqn    = f"{silver_schema}.{silver_table}"
+        # derive Gold output schema from pipeline context output_schema
+        ctx_schema_rows = session.sql(
+            "SELECT COALESCE(NULLIF(output_schema,''),'GOLD') FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT WHERE context_id=1"
+        ).collect()
+        output_schema = ctx_schema_rows[0][0] if ctx_schema_rows else 'GOLD'
+        # replace trailing schema segment with GOLD (e.g. ATS_V3_TEST.SILVER -> ATS_V3_TEST.GOLD)
+        parts = output_schema.split('.')
+        gold_db     = parts[0] if len(parts) > 1 else current_db
+        gold_schema_name = 'GOLD'
+        gold_name   = f"{gold_db}.{gold_schema_name}.{silver_table}_ANALYTICS"
 
         columns_list, directives_ctx = get_silver_metadata(session, current_db, silver_schema, silver_table)
 
