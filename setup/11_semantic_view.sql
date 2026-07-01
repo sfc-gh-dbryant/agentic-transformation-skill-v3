@@ -1,21 +1,20 @@
 -- =============================================================================
--- 11_semantic_view.sql  [v3 NEW]
--- ATS Pipeline Semantic View generated via SYSTEM$CORTEX_ANALYST_FAST_GENERATION.
--- Enables natural language queries over ATS pipeline state.
--- To regenerate: run demo/regenerate_semantic_view.py
+-- 11_semantic_view.sql  [v3/v4 deploy-agnostic]
+-- ATS Pipeline Semantic View for Cortex Analyst natural language queries.
+--
+-- NOTE: The YAML contains "database: ATS_V3" as a placeholder.
+-- deploy.sh substitutes the actual TARGET_DB via sed before running this file.
+-- Do NOT change "database: ATS_V3" — it is the sed substitution target.
 -- =============================================================================
 
 USE DATABASE IDENTIFIER($TARGET_DB);
 
 SET SV_SCHEMA = $TARGET_DB || '.AGENT_FRAMEWORK';
 
--- Use SET + REPLACE so $TARGET_DB substitutes into YAML ($$-block prevents variable expansion)
-SET sv_yaml = REPLACE('
-name: ats_pipeline_semantics
-description: ATS v3 Pipeline Semantic View. Enables natural language queries over
-  the agentic data transformation pipeline state. Covers Bronze to Silver to Gold
-  table coverage, Planner transformation strategy decisions, Reflector learnings,
-  Schema Analyst FK relationships, and workflow execution history.
+CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
+    $SV_SCHEMA,
+    'name: ats_pipeline_semantics
+description: ATS Pipeline Semantic View. Enables natural language queries over the agentic data transformation pipeline state. Covers Bronze to Silver to Gold table coverage, Planner transformation strategy decisions, Reflector learnings, Schema Analyst FK relationships, and workflow execution history.
 tables:
   - name: TABLE_LINEAGE_MAP
     base_table:
@@ -237,36 +236,27 @@ tables:
 verified_queries:
   - name: 0;1
     question: What is the pipeline coverage status for each table?
-    sql: SELECT BRONZE_TABLE, SILVER_TABLE, SILVER_STATUS, GOLD_TABLE, GOLD_STATUS,
-      ROW_COUNT_BRONZE, ROW_COUNT_SILVER, ROW_COUNT_GOLD FROM table_lineage_map ORDER
-      BY BRONZE_TABLE
+    sql: SELECT BRONZE_TABLE, SILVER_TABLE, SILVER_STATUS, GOLD_TABLE, GOLD_STATUS, ROW_COUNT_BRONZE, ROW_COUNT_SILVER, ROW_COUNT_GOLD FROM table_lineage_map ORDER BY BRONZE_TABLE
     verified_at: 1781813022
     verified_by: Semantic Model Generator
   - name: 1;1
     question: What percentage of tables have completed Silver transformation?
-    sql: SELECT COUNT(DISTINCT BRONZE_TABLE) AS total_tables, COUNT_IF(SILVER_STATUS
-      = ''COMPLETE'') AS silver_complete, ROUND(COUNT_IF(SILVER_STATUS = ''COMPLETE'')
-      * 100.0 / NULLIF(COUNT(*), 0), 1) AS silver_pct FROM table_lineage_map
+    sql: SELECT COUNT(DISTINCT BRONZE_TABLE) AS total_tables, COUNT_IF(SILVER_STATUS = ''COMPLETE'') AS silver_complete, ROUND(COUNT_IF(SILVER_STATUS = ''COMPLETE'') * 100.0 / NULLIF(COUNT(*), 0), 1) AS silver_pct FROM table_lineage_map
     verified_at: 1781813022
     verified_by: Semantic Model Generator
   - name: 2;1
-    question: What transformation strategy did the Planner choose for each table,
-      ordered by confidence level?
-    sql: SELECT SOURCE_TABLE, TRANSFORMATION_STRATEGY, CONFIDENCE_SCORE, PK_COLUMNS
-      FROM planner_decisions ORDER BY CONFIDENCE_SCORE DESC
+    question: What transformation strategy did the Planner choose for each table, ordered by confidence level?
+    sql: SELECT SOURCE_TABLE, TRANSFORMATION_STRATEGY, CONFIDENCE_SCORE, PK_COLUMNS FROM planner_decisions ORDER BY CONFIDENCE_SCORE DESC
     verified_at: 1781813022
     verified_by: Semantic Model Generator
   - name: 3;1
     question: What are the top active Reflector learnings?
-    sql: SELECT LEARNING_TYPE, SOURCE_CONTEXT, OBSERVATION, RECOMMENDATION, CONFIDENCE_SCORE,
-      TIMES_OBSERVED FROM workflow_learnings WHERE IS_ACTIVE = TRUE ORDER BY CONFIDENCE_SCORE
-      DESC
+    sql: SELECT LEARNING_TYPE, SOURCE_CONTEXT, OBSERVATION, RECOMMENDATION, CONFIDENCE_SCORE, TIMES_OBSERVED FROM workflow_learnings WHERE IS_ACTIVE = TRUE ORDER BY CONFIDENCE_SCORE DESC
     verified_at: 1781813022
     verified_by: Semantic Model Generator
   - name: 4;1
     question: Which high-confidence foreign key relationships were discovered?
-    sql: SELECT SOURCE_TABLE, SOURCE_COLUMN, TARGET_TABLE, RELATIONSHIP_TYPE, CONFIDENCE
-      FROM schema_relationships WHERE CONFIDENCE >= 0.7 ORDER BY CONFIDENCE DESC
+    sql: SELECT SOURCE_TABLE, SOURCE_COLUMN, TARGET_TABLE, RELATIONSHIP_TYPE, CONFIDENCE FROM schema_relationships WHERE CONFIDENCE >= 0.7 ORDER BY CONFIDENCE DESC
     verified_at: 1781813022
     verified_by: Semantic Model Generator
   - name: 5;1
@@ -274,6 +264,6 @@ verified_queries:
     sql: SELECT STATUS, COUNT(*) AS run_count FROM workflow_executions GROUP BY STATUS
     verified_at: 1781813022
     verified_by: Semantic Model Generator
-', 'database: ATS_V3', 'database: ' || $TARGET_DB);
-
-EXECUTE IMMEDIATE 'CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(''' || $SV_SCHEMA || ''', ''' || $sv_yaml || ''', FALSE)';
+',
+    FALSE
+);

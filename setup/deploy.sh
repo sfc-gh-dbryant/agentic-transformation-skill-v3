@@ -114,12 +114,18 @@ run_script() {
 }
 
 # Optional scripts: failures warn but do not abort deploy
+# Pass a second arg (sed expression) to do a string substitution before running.
 run_script_optional() {
     local script="$1"
+    local sed_expr="${2:-}"
     local tmpfile
     tmpfile=$(mktemp /tmp/deploy_XXXXX.sql)
     printf '%s\n' "${SET_VARS}" > "${tmpfile}"
-    cat "${SCRIPT_DIR}/${script}" >> "${tmpfile}"
+    if [[ -n "$sed_expr" ]]; then
+        sed "$sed_expr" "${SCRIPT_DIR}/${script}" >> "${tmpfile}"
+    else
+        cat "${SCRIPT_DIR}/${script}" >> "${tmpfile}"
+    fi
     if snow sql -c "${CONNECTION}" -f "${tmpfile}" 2>&1; then
         echo "✓  $script complete"
     else
@@ -167,7 +173,11 @@ done
 echo "▶  Running optional enhancement scripts (10-12)..."
 for script in "${OPTIONAL_SCRIPTS[@]}"; do
     echo "▶  Running $script ..."
-    run_script_optional "${script}"
+    if [[ "$script" == "11_semantic_view.sql" ]]; then
+        run_script_optional "${script}" "s/database: ATS_V3/database: ${TARGET_DB}/g"
+    else
+        run_script_optional "${script}"
+    fi
     echo ""
 done
 
