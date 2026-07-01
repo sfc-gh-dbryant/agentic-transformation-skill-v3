@@ -101,10 +101,12 @@ import json
 
 def run(session, query: str, max_results: int) -> str:
     try:
+        current_db = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
+        search_service = current_db + ".AGENT_FRAMEWORK.ATS_KNOWLEDGE_SEARCH"
         payload = json.dumps({"query": query, "limit": max_results})
         row = session.sql(
             "SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW(?, ?) AS resp",
-            params=["ATS_V3.AGENT_FRAMEWORK.ATS_KNOWLEDGE_SEARCH", payload]
+            params=[search_service, payload]
         ).collect()[0]
         raw = row["RESP"]
         resp = json.loads(raw) if isinstance(raw, str) else raw

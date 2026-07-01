@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATS — Internal Sales Guide</title>
+<style>
+  :root {
+    --sf-blue: #29B5E8;
+    --sf-dark: #11213B;
+    --sf-navy: #0d1b2e;
+    --sf-white: #FFFFFF;
+    --sf-gray: #8AA0B8;
+    --sf-light-bg: #f4f7fb;
+    --sf-border: #dce6f0;
+    --sf-green: #2ECC71;
+    --sf-red: #E74C3C;
+    --sf-orange: #F39C12;
+    --sf-accent: #00D4FF;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--sf-light-bg);
+    color: #1a2a3a;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* ── HEADER ── */
+  .page-header {
+    background: var(--sf-dark);
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .page-header img { height: 28px; }
+  .header-title {
+    color: var(--sf-white);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .header-badge {
+    background: var(--sf-orange);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 12px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  .page-body {
+    margin-top: 56px;
+    padding: 24px 32px 40px;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ── HERO BANNER ── */
+  .hero {
+    background: linear-gradient(135deg, var(--sf-dark) 0%, #1a3a5c 100%);
+    border-radius: 10px;
+    padding: 28px 32px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .hero-text h1 {
+    color: var(--sf-white);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 6px;
+  }
+  .hero-text p {
+    color: var(--sf-gray);
+    font-size: 13px;
+    max-width: 480px;
+  }
+  .hero-pill {
+    background: rgba(41,181,232,0.15);
+    border: 1px solid var(--sf-blue);
+    color: var(--sf-blue);
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    letter-spacing: 0.5px;
+  }
+  .hero-rule {
+    background: rgba(41,181,232,0.2);
+    border: 1px solid var(--sf-blue);
+    border-radius: 8px;
+    padding: 12px 20px;
+    margin-top: 14px;
+  }
+  .hero-rule p {
+    color: var(--sf-accent) !important;
+    font-size: 13px;
+    font-weight: 600;
+    font-style: italic;
+  }
+
+  /* ── GRID ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-full { margin-bottom: 16px; }
+
+  /* ── SECTION CARD ── */
+  .card {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--sf-border);
+    overflow: hidden;
+  }
+  .card-header {
+    background: var(--sf-dark);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-header h2 {
+    color: var(--sf-white);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  .card-header .icon { font-size: 14px; }
+  .card-body { padding: 14px 16px; }
+
+  /* ── DO/DON'T TABLE ── */
+  .do-dont-table { width: 100%; border-collapse: collapse; }
+  .do-dont-table th {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--sf-border);
+  }
+  .do-dont-table th:first-child { color: var(--sf-green); }
+  .do-dont-table th:last-child { color: var(--sf-red); }
+  .do-dont-table td {
+    padding: 8px 12px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--sf-border);
+    vertical-align: top;
+    line-height: 1.4;
+  }
+  .do-dont-table tr:last-child td { border-bottom: none; }
+  .do-dont-table td:first-child {
+    border-left: 3px solid var(--sf-green);
+    background: #f0fdf4;
+    color: #1a3a2a;
+  }
+  .do-dont-table td:last-child {
+    border-left: 3px solid var(--sf-red);
+    background: #fff5f5;
+    color: #3a1a1a;
+  }
+
+  /* ── SCOPE LISTS ── */
+  .scope-list { list-style: none; padding: 0; }
+  .scope-list li {
+    padding: 5px 0 5px 22px;
+    font-size: 12px;
+    position: relative;
+    border-bottom: 1px solid #f0f4f8;
+    color: #2a3a4a;
+  }
+  .scope-list li:last-child { border-bottom: none; }
+  .scope-list.in li::before { content: "✓"; position: absolute; left: 0; color: var(--sf-green); font-weight: 700; }
+  .scope-list.out li::before { content: "✗"; position: absolute; left: 0; color: var(--sf-red); font-weight: 700; }
+
+  /* ── PIPELINE AUTHORING DIAGRAM ── */
+  .pipeline-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 12px 0;
+    flex-wrap: wrap;
+  }
+  .pipeline-box {
+    background: var(--sf-dark);
+    color: var(--sf-white);
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    border: 1px solid var(--sf-blue);
+  }
+  .pipeline-box.ats { background: var(--sf-blue); color: var(--sf-dark); }
+  .pipeline-box.ops { background: #1a4a1a; border-color: var(--sf-green); color: #a0f0a0; }
+  .pipeline-arrow {
+    color: var(--sf-gray);
+    font-size: 18px;
+    padding: 0 6px;
+    font-weight: 300;
+  }
+  .pipeline-label {
+    font-size: 10px;
+    color: var(--sf-gray);
+    text-align: center;
+    margin-top: 4px;
+  }
+  .pipeline-step { text-align: center; }
+
+  /* ── SOW BLOCK ── */
+  .sow-block {
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    font-style: italic;
+  }
+  .sow-block.correct {
+    background: #f0fdf4;
+    border-left: 4px solid var(--sf-green);
+    color: #1a3a2a;
+  }
+  .sow-block.incorrect {
+    background: #fff5f5;
+    border-left: 4px solid var(--sf-red);
+    color: #3a1a1a;
+  }
+  .sow-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+    font-style: normal;
+  }
+  .sow-label.correct { color: var(--sf-green); }
+  .sow-label.incorrect { color: var(--sf-red); }
+
+  /* ── ARCH CAPITAL CARD ── */
+  .arch-card {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid var(--sf-border);
+    border-top: 3px solid var(--sf-blue);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .arch-header {
+    background: linear-gradient(90deg, #0d1b2e, #1a3a5c);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .arch-header h2 { color: var(--sf-white); font-size: 13px; font-weight: 700; }
+  .arch-header .arch-sub { color: var(--sf-gray); font-size: 11px; margin-top: 2px; }
+  .arch-header .confidential {
+    background: rgba(243,156,18,0.2);
+    border: 1px solid var(--sf-orange);
+    color: var(--sf-orange);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .arch-body {
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .arch-section h3 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--sf-blue);
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--sf-border);
+  }
+  .arch-list { list-style: none; padding: 0; }
+  .arch-list li {
+    font-size: 12px;
+    padding: 4px 0 4px 16px;
+    position: relative;
+    color: #2a3a4a;
+    border-bottom: 1px solid #f0f4f8;
+    line-height: 1.4;
+  }
+  .arch-list li:last-child { border-bottom: none; }
+  .arch-list li::before { content: "→"; position: absolute; left: 0; color: var(--sf-blue); font-size: 11px; }
+  .quote-block {
+    background: #f4f8ff;
+    border-left: 3px solid var(--sf-blue);
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+    font-style: italic;
+    color: #2a3a4a;
+    line-height: 1.5;
+    margin: 8px 0;
+  }
+  .upsell-phases {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .upsell-phase {
+    flex: 1;
+    background: var(--sf-light-bg);
+    border: 1px solid var(--sf-border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .upsell-phase .phase-num {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--sf-blue);
+    line-height: 1;
+  }
+  .upsell-phase .phase-label {
+    font-size: 10px;
+    color: var(--sf-gray);
+    margin-top: 2px;
+  }
+  .upsell-phase .phase-desc {
+    font-size: 11px;
+    color: #2a3a4a;
+    margin-top: 4px;
+    font-weight: 600;
+  }
+
+  /* ── FAQ BLOCKS ── */
+  .faq-item {
+    border-bottom: 1px solid var(--sf-border);
+    padding: 10px 0;
+  }
+  .faq-item:last-child { border-bottom: none; }
+  .faq-q {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--sf-dark);
+    margin-bottom: 4px;
+  }
+  .faq-q::before { content: "Q "; color: var(--sf-blue); }
+  .faq-a {
+    font-size: 12px;
+    color: #3a4a5a;
+    line-height: 1.5;
+  }
+
+  /* ── POSITIONING STATEMENT ── */
+  .positioning-block {
+    background: linear-gradient(135deg, var(--sf-dark), #1a3a5c);
+    border-radius: 8px;
+    padding: 18px 24px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .positioning-block p {
+    color: var(--sf-white);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.6;
+    font-style: italic;
+  }
+  .positioning-block p strong { color: var(--sf-accent); font-style: normal; }
+
+  /* ── FOOTER ── */
+  .page-footer {
+    text-align: center;
+    padding: 16px;
+    color: var(--sf-gray);
+    font-size: 11px;
+    border-top: 1px solid var(--sf-border);
+    margin-top: 8px;
+  }
+
+  @media print {
+    .page-header { position: relative; }
+    .page-body { margin-top: 0; }
+    body { background: white; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="page-header">
+  <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+  <div class="header-title">Agentic Transformation Skill — Internal Sales Guide</div>
+  <div class="header-badge">🔒 Internal Only</div>
+</div>
+
+<div class="page-body">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-text">
+      <h1>Agentic Transformation Skill (ATS)</h1>
+      <p>How to position it, what to promise, and what to avoid. Read this before any customer conversation involving data pipeline automation.</p>
+      <div class="hero-rule">
+        <p>The customer does not buy ATS. PS uses ATS to deliver an engagement.</p>
+      </div>
+    </div>
+    <div class="hero-pill">PS Accelerator<br>Not a Product</div>
+  </div>
+
+  <!-- ROW 1: What it is + Do/Don't -->
+  <div class="grid-2">
+
+    <!-- What ATS Is -->
+    <div class="card">
+      <div class="card-header"><span class="icon">🎯</span><h2>What ATS Actually Is</h2></div>
+      <div class="card-body">
+        <p style="font-size:12px; color:#2a3a4a; margin-bottom:10px;">
+          ATS is a <strong>PS productivity accelerator</strong> — an agentic framework PS uses internally to deliver Bronze → Silver pipeline transformations faster and with higher quality than traditional methods.
+        </p>
+        <p style="font-size:12px; font-weight:700; color:#1a2a3a; margin-bottom:8px;">The customer receives the <em>outputs</em>:</p>
+        <ul class="scope-list in">
+          <li>Silver tables — validated, analytics-ready</li>
+          <li>Schema contracts &amp; transformation directives</li>
+          <li>Workflow history and lineage</li>
+          <li>The deployed ATS framework (optional leave-behind)</li>
+          <li>Knowledge transfer to the DE team</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Do/Don't -->
+    <div class="card">
+      <div class="card-header"><span class="icon">💬</span><h2>The Right Way to Position It</h2></div>
+      <div class="card-body" style="padding:0;">
+        <table class="do-dont-table">
+          <thead>
+            <tr>
+              <th>✅ Say This</th>
+              <th>❌ Not This</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>"We use an AI-accelerated methodology that compresses pipeline development from weeks to days"</td>
+              <td>"We're delivering a product called the Agentic Transformation Skill"</td>
+            </tr>
+            <tr>
+              <td>"You'll receive validated Silver tables and a reusable framework your team can extend"</td>
+              <td>"ATS will automate your data pipelines going forward"</td>
+            </tr>
+            <tr>
+              <td>"Our agents plan, execute, and validate — your team reviews and approves the output"</td>
+              <td>"This is a no-code solution your team can run without DE expertise"</td>
+            </tr>
+            <tr>
+              <td>"The framework is yours post-engagement — we'll train your team to operate it"</td>
+              <td>"Snowflake will support and maintain ATS after the engagement"</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ROW 2: Pipeline Distinction + Scope + SOW -->
+  <div class="grid-3">
+
+    <!-- Pipeline Authoring vs Execution -->
+    <div class="card" style="grid-column: span 2;">
+      <div class="card-header"><span class="icon">⚡</span><h2>The Critical Distinction: Authoring vs. Execution</h2></div>
+      <div class="card-body">
+        <p style="font-size:13px; font-weight:700; color:var(--sf-dark); margin-bottom:10px;">ATS authors the pipeline. It is not the pipeline.</p>
+        <p style="font-size:12px; color:#3a4a5a; margin-bottom:12px;">
+          When a customer asks <em>"will ATS automatically transform new Bronze data every night?"</em> — the answer is no, and it shouldn't. ATS answers the hardest question: <em>given raw tables I've never seen before, what should my Silver layer look like?</em> Once answered, running the LLM nightly to re-make decisions that are already made is wasteful. The correct path:
+        </p>
+        <div class="pipeline-flow">
+          <div class="pipeline-step">
+            <div class="pipeline-box ats">ATS (PS Engagement)</div>
+            <div class="pipeline-label">Authors Silver DDL<br>+ proposes Gold DDL</div>
+          </div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step">
+            <div class="pipeline-box">Human Review</div>
+            <div class="pipeline-label">Customer DE approves<br>every DDL before execution</div>
+          </div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step">
+            <div class="pipeline-box">Silver + Gold Tables</div>
+            <div class="pipeline-label">Validated, analytics-ready<br>data in Snowflake</div>
+          </div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step">
+            <div class="pipeline-box ops">Operationalized Pipeline</div>
+            <div class="pipeline-label">Dynamic Tables / Tasks / dbt<br>runs on schedule, no AI</div>
+          </div>
+        </div>
+        <p style="font-size:11px; color:var(--sf-gray); font-style:italic; margin-top:8px;">
+          Think of ATS like an architect's AI-assisted design software — it accelerates how fast blueprints are produced. You don't leave the design software running in the building after construction.
+        </p>
+      </div>
+    </div>
+
+    <!-- Scope -->
+    <div class="card">
+      <div class="card-header"><span class="icon">📋</span><h2>Scope</h2></div>
+      <div class="card-body">
+        <p style="font-size:10px; font-weight:700; color:var(--sf-green); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">In Scope</p>
+        <ul class="scope-list in" style="margin-bottom:10px;">
+          <li>Bronze-layer schema discovery</li>
+          <li>AI-generated Silver DDL</li>
+          <li>Schema contracts &amp; directives</li>
+          <li>AI-proposed Gold/Analytics DDL (human reviews before execution)</li>
+          <li>DCM export for production handoff</li>
+          <li>Execution history &amp; lineage</li>
+          <li>Knowledge transfer</li>
+        </ul>
+        <p style="font-size:10px; font-weight:700; color:var(--sf-red); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Out of Scope</p>
+        <ul class="scope-list out">
+          <li>Bronze ingestion / CDC</li>
+          <li>BI tooling (Power BI, Sigma, Tableau)</li>
+          <li>Production pipeline operations</li>
+          <li>Ongoing support or SLA</li>
+          <li>Custom agent development</li>
+          <li>Production hardening / DR</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ROW 3: SOW Framing -->
+  <div class="grid-full">
+    <div class="card">
+      <div class="card-header"><span class="icon">📄</span><h2>SOW Framing — This Matters</h2></div>
+      <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div>
+          <div class="sow-label correct">✓ Correct</div>
+          <div class="sow-block correct">"Snowflake PS will deliver a production-validated Silver data layer for [N] source tables, including schema contracts, transformation directives, and pipeline documentation. The delivery will be accelerated using Snowflake's internal agentic delivery methodology."</div>
+        </div>
+        <div>
+          <div class="sow-label incorrect">✗ Do Not SOW</div>
+          <div class="sow-block incorrect">"Snowflake PS will deliver and implement the Agentic Transformation Skill platform."</div>
+          <p style="font-size:11px; color:#666; margin-top:8px;">This creates product delivery expectations, ongoing support obligations, and version maintenance discussions you cannot fulfill.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ARCH CAPITAL -->
+  <div class="arch-card">
+    <div class="arch-header">
+      <div>
+        <h2>🏢 Example Scenario — Multi-BU Platform Migration</h2>
+        <div class="arch-sub">A pattern common in FSI and enterprise migrations from on-prem SQL Server / SSIS to Snowflake</div>
+      </div>
+      <div class="confidential">Reference Scenario</div>
+    </div>
+    <div class="arch-body">
+      <div class="arch-section">
+        <h3>The Situation</h3>
+        <ul class="arch-list">
+          <li>Specialty insurance carrier migrating 15 BUs from SQL Server + SSIS to Snowflake</li>
+          <li>Each BU has its own raw Bronze tables and SSIS transformation logic nobody fully understands</li>
+          <li>Data platform team must deliver a clean Silver layer across all 15 BUs by year-end</li>
+          <li>Manual approach: 6–8 weeks per BU — impossible at that timeline</li>
+        </ul>
+        <h3 style="margin-top:12px;">Why ATS Fits</h3>
+        <ul class="arch-list">
+          <li>ATS built precisely for unknown schemas and business rules buried in legacy pipelines</li>
+          <li>Reflector captures learnings from BU 1 — dedup keys, type patterns, edge cases — and applies them to BU 2–15</li>
+          <li>Delivery time compresses with each successive BU as the framework learns the domain</li>
+        </ul>
+      </div>
+      <div class="arch-section">
+        <h3>What to Say</h3>
+        <div class="quote-block">"We can compress your per-BU pipeline development from 6–8 weeks to under 2 weeks. Your team gets validated Silver tables, documented business rules, and transformation directives that encode the institutional knowledge your legacy pipelines currently carry. Once a BU is done, we operationalize into native Snowflake pipelines — ATS is the authoring accelerator, not the runtime engine."</div>
+        <h3 style="margin-top:12px;">The Upsell Path</h3>
+        <div class="upsell-phases">
+          <div class="upsell-phase">
+            <div class="phase-num">1</div>
+            <div class="phase-desc">Pilot: 1 BU</div>
+            <div class="phase-label">Validates methodology · de-risks program</div>
+          </div>
+          <div class="upsell-phase">
+            <div class="phase-num">2</div>
+            <div class="phase-desc">Remaining BUs</div>
+            <div class="phase-label">Accelerated using Phase 1 learnings</div>
+          </div>
+          <div class="upsell-phase">
+            <div class="phase-num">3</div>
+            <div class="phase-desc">Enablement</div>
+            <div class="phase-label">Train DE team to run ATS independently</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BROWNFIELD SAFEGUARDS -->
+  <div class="grid-full">
+    <div class="card">
+      <div class="card-header"><span class="icon">🛡️</span><h2>Brownfield Safeguards — Existing Data Is Protected</h2></div>
+      <div class="card-body">
+        <p style="font-size:12px; color:#3a4a5a; margin-bottom:12px;">ATS runs safely in environments that already have Silver tables, partial pipelines, or existing schema objects. Three built-in controls prevent accidental overwrites — all default to the safe position.</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px;">
+          <div style="background:#f0fdf4; border:1px solid #a0e0b0; border-top:3px solid var(--sf-green); border-radius:6px; padding:12px;">
+            <div style="font-size:11px; font-weight:700; color:var(--sf-green); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">🔒 Dry Run</div>
+            <div style="font-size:11px; font-weight:700; color:#1a3a2a; margin-bottom:4px;">Default: ON</div>
+            <div style="font-size:12px; color:#2a4a3a; line-height:1.5;">Generates and logs all DDL but <strong>never executes</strong>. Customer reviews every statement first. Must be explicitly set to OFF to run anything.</div>
+          </div>
+          <div style="background:#f0fdf4; border:1px solid #a0e0b0; border-top:3px solid var(--sf-green); border-radius:6px; padding:12px;">
+            <div style="font-size:11px; font-weight:700; color:var(--sf-green); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">🔒 No Overwrite</div>
+            <div style="font-size:11px; font-weight:700; color:#1a3a2a; margin-bottom:4px;">Default: OFF</div>
+            <div style="font-size:12px; color:#2a4a3a; line-height:1.5;">If a target table already has rows, the Executor <strong>skips that table, logs TARGET_EXISTS_NO_OVERWRITE, and continues with the remaining tables</strong>. Other tables in the same run are unaffected.</div>
+          </div>
+          <div style="background:#f0fdf4; border:1px solid #a0e0b0; border-top:3px solid var(--sf-blue); border-radius:6px; padding:12px;">
+            <div style="font-size:11px; font-weight:700; color:var(--sf-blue); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;">🔀 Brownfield Mode</div>
+            <div style="font-size:11px; font-weight:700; color:#1a2a3a; margin-bottom:4px;">Default: OFF</div>
+            <div style="font-size:12px; color:#2a3a4a; line-height:1.5;">When enabled, <strong>skips existing Silver tables entirely</strong> (logs as EXISTING, not failures) and only processes gaps. Use when some tables are already built.</div>
+          </div>
+        </div>
+        <div style="background:#fff8e6; border:1px solid var(--sf-orange); border-radius:6px; padding:10px 14px; display:flex; align-items:flex-start; gap:10px;">
+          <span style="font-size:16px;">🔑</span>
+          <div>
+            <div style="font-size:11px; font-weight:700; color:var(--sf-orange); margin-bottom:3px;">Two-Key Interlock</div>
+            <div style="font-size:12px; color:#3a3a2a;">Enabling overwrite requires <em>both</em> <code>dry_run=FALSE</code> AND <code>overwrite_existing=TRUE</code> set simultaneously. Setting one without the other returns an error.</div>
+          </div>
+        </div>
+        <div style="background:#fff0f0; border:1px solid #e0a0a0; border-radius:6px; padding:10px 14px; margin-top:10px; display:flex; align-items:flex-start; gap:10px;">
+          <span style="font-size:16px;">⚠️</span>
+          <div>
+            <div style="font-size:11px; font-weight:700; color:var(--sf-red); margin-bottom:3px;">Limitation: Existing Pipeline Coexistence</div>
+            <div style="font-size:12px; color:#3a2a2a; line-height:1.6;">The row-count check only protects <strong>populated</strong> tables. It does <em>not</em> protect empty tables (e.g. a new dbt model not yet run), Dynamic Tables, or Views — <code>CREATE OR REPLACE TABLE</code> will silently replace them. <strong>Use <code>output_schema</code> isolation</strong>: configure ATS to write to a dedicated staging schema (e.g. <code>SILVER_PROPOSED</code>) separate from any schema your existing pipelines own.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FAQ -->
+  <div class="grid-full">
+    <div class="card">
+      <div class="card-header"><span class="icon">❓</span><h2>Handling Common Sales Conversations</h2></div>
+      <div class="card-body">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 24px;">
+          <div>
+            <div class="faq-item">
+              <div class="faq-q">"Can we include ATS as a line item in the SOW?"</div>
+              <div class="faq-a">No. ATS is <em>how</em> PS delivers — not <em>what</em> PS delivers. Line items are the pipeline outputs. Reference the methodology in the SOW narrative but do not scope it as a deliverable.</div>
+            </div>
+            <div class="faq-item">
+              <div class="faq-q">"The customer wants to see a demo."</div>
+              <div class="faq-a">Yes — the Streamlit app is designed for this. Demo the pipeline running, the agents working, the observability. Frame it as "this is how we build pipelines" — not "this is what you're buying."</div>
+            </div>
+          </div>
+          <div>
+            <div class="faq-item">
+              <div class="faq-q">"The customer wants to own ATS post-engagement."</div>
+              <div class="faq-a">Fully supported — great upsell to an enablement engagement. The framework deploys in their account and they can extend it. But: their team needs DE expertise to operate it, and Snowflake PS support ends with the engagement.</div>
+            </div>
+            <div class="faq-item">
+              <div class="faq-q">"Can we productize ATS for the Marketplace?"</div>
+              <div class="faq-a">Not at this time. ATS is an internal PS accelerator. Any Marketplace or productization conversation must involve PS leadership before any customer discussion.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- POSITIONING STATEMENT -->
+  <div class="positioning-block">
+    <p>"Snowflake Professional Services uses an AI-powered delivery framework to transform your raw Bronze data into validated, analytics-ready Silver tables — <strong>in days instead of weeks</strong> — leaving you with clean data, documented business rules, and a reusable pipeline framework your team can own."</p>
+  </div>
+
+  <div class="page-footer">
+    Internal use only — Snowflake Professional Services &nbsp;|&nbsp; Do not share externally &nbsp;|&nbsp; Generated June 2026
+  </div>
+
+</div>
+</body>
+</html>

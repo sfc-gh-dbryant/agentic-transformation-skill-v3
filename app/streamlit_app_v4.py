@@ -11,15 +11,15 @@ Tabs:
   4  Agent Chat       — Direct conversation with any individual agent [v4 NEW]
   5  Tool Inspector   — Browse and invoke the 34 ATS_TOOL_* SPs [v4 NEW]
   6  Context          — Pipeline context: business description, domain, Gold goals
-  7  Contracts        — Edit structural rules injected into LLM prompts
-  8  Directives       — Edit per-table business intent
-  9  Workflow         — Run agentic Enriched pipeline with live phase display
-  10 Analytics Builder — Review + execute or export Analytics DDL proposals
-  11 Registry         — Transformation Registry: lineage map + learnings
-  12 Observe          — Observability: KPIs, executor perf, learning intelligence loop
-  13 Partner Routing  — Banner/routing config and validation
-  14 DCM Export       — Generate DCM project from pipeline output
-  15 Documents        — Upload domain documents into knowledge corpus
+  7  Documents        — Upload domain documents before running workflow [moved up]
+  8  Contracts        — Edit structural rules injected into LLM prompts
+  9  Directives       — Edit per-table business intent
+  10 Workflow         — Run agentic Enriched pipeline with live phase display
+  11 Analytics Builder — Review + execute or export Analytics DDL proposals
+  12 Registry         — Transformation Registry: lineage map + learnings
+  13 Observe          — Observability: KPIs, executor perf, learning intelligence loop
+  14 Partner Routing  — Banner/routing config and validation
+  15 DCM Export       — Generate DCM project from pipeline output
 """
 
 import json
@@ -2956,6 +2956,7 @@ def main():
         "💬 Agent Chat",
         "🔧 Tool Inspector",
         "💡 Context",
+        "📄 Documents",
         "📐 Contracts",
         "🎯 Directives",
         "🤖 Workflow",
@@ -2964,7 +2965,6 @@ def main():
         "📊 Observe",
         "🏷️ Partner Routing",
         "📦 DCM Export",
-        "📄 Documents",
     ]
     TAB_RENDER = [
         render_setup_tab,
@@ -2973,6 +2973,7 @@ def main():
         render_agent_chat_tab,
         render_tool_inspector_tab,
         render_context_tab,
+        render_documents_tab,
         render_contracts_tab,
         render_directives_tab,
         render_workflow_tab,
@@ -2981,7 +2982,6 @@ def main():
         render_observability_tab,
         render_banner_tab,
         render_dcm_tab,
-        render_documents_tab,
     ]
 
     if "active_tab" not in st.session_state:

@@ -7,6 +7,7 @@
 --   Then run this file, or use deploy.sh to inject automatically.
 -- =============================================================================
 
+CREATE DATABASE IF NOT EXISTS IDENTIFIER($TARGET_DB);
 USE DATABASE IDENTIFIER($TARGET_DB);
 
 -- ---------------------------------------------------------------------------

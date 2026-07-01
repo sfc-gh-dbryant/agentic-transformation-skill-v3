@@ -113,6 +113,21 @@ run_script() {
     rm -f "${tmpfile}"
 }
 
+# Optional scripts: failures warn but do not abort deploy
+run_script_optional() {
+    local script="$1"
+    local tmpfile
+    tmpfile=$(mktemp /tmp/deploy_XXXXX.sql)
+    printf '%s\n' "${SET_VARS}" > "${tmpfile}"
+    cat "${SCRIPT_DIR}/${script}" >> "${tmpfile}"
+    if snow sql -c "${CONNECTION}" -f "${tmpfile}" 2>&1; then
+        echo "✓  $script complete"
+    else
+        echo "⚠  $script failed (optional — skipping). Retry from Streamlit after deploy."
+    fi
+    rm -f "${tmpfile}"
+}
+
 # ---------------------------------------------------------------------------
 # Run setup scripts in order
 # ---------------------------------------------------------------------------
@@ -134,14 +149,36 @@ SCRIPTS=(
     "08_cost_attribution.sql"
     "08_dcm_export.sql"
     "09_banner_config.sql"
+)
+
+OPTIONAL_SCRIPTS=(
     "10_cortex_search.sql"
     "11_semantic_view.sql"
     "12_document_ingestion.sql"
+)
+
+for script in "${SCRIPTS[@]}"; do
+    echo "▶  Running $script ..."
+    run_script "${script}"
+    echo "✓  $script complete"
+    echo ""
+done
+
+echo "▶  Running optional enhancement scripts (10-12)..."
+for script in "${OPTIONAL_SCRIPTS[@]}"; do
+    echo "▶  Running $script ..."
+    run_script_optional "${script}"
+    echo ""
+done
+
+# v4-specific scripts (required)
+V4_SCRIPTS=(
     "v4_tools.sql"
     "v4_agents.sql"
 )
 
-for script in "${SCRIPTS[@]}"; do
+echo "▶  Running v4 agent scripts..."
+for script in "${V4_SCRIPTS[@]}"; do
     echo "▶  Running $script ..."
     run_script "${script}"
     echo "✓  $script complete"

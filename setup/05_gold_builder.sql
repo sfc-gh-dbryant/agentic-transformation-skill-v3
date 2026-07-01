@@ -44,14 +44,23 @@ def run(session, ddl_statement, source_silver_table=None):
 
     while retry_count < max_retries:
         try:
+            # Ensure Gold schema exists before executing DDL
+            tbl_match = re.search(r'TABLE\s+([\w\.]+)', working_ddl, re.IGNORECASE)
+            if tbl_match:
+                tbl_parts = tbl_match.group(1).strip().split('.')
+                if len(tbl_parts) >= 2:
+                    gold_db_schema = '.'.join(tbl_parts[:-1])
+                    session.sql(f"CREATE SCHEMA IF NOT EXISTS {gold_db_schema}").collect()
+
             stmts = [s.strip() for s in working_ddl.split(';') if len(s.strip()) > 3]
             for stmt in stmts:
                 session.sql(stmt).collect()
 
             match = re.search(r'TABLE\s+([\w\.]+)', working_ddl, re.IGNORECASE)
             extracted_table = match.group(1).strip() if match else ''
-            gold_table_name = extracted_table.split('.')[-1]
-            gold_schema     = extracted_table.split('.')[-2] if '.' in extracted_table else 'GOLD'
+            parts       = extracted_table.split('.')
+            gold_schema = '.'.join(parts[:-1]) if len(parts) >= 3 else (parts[-2] if len(parts) == 2 else 'GOLD')
+            gold_table_name = parts[-1]
 
             silver_tbl = source_silver_table
             if not silver_tbl:
@@ -126,11 +135,15 @@ AS $$
 import re, json
 
 def get_silver_metadata(session, current_db: str, silver_schema: str, silver_table: str) -> tuple:
+    # silver_schema may be 'DB.SCHEMA' (cross-db) or plain 'SCHEMA'
+    parts = silver_schema.split('.')
+    info_db     = parts[0] if len(parts) > 1 else current_db
+    schema_only = parts[-1]
     col_rows = session.sql(f"""
         SELECT LISTAGG(COLUMN_NAME || ' (' || DATA_TYPE || ')', ', ')
             WITHIN GROUP (ORDER BY ORDINAL_POSITION)
-        FROM {current_db}.INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = UPPER('{silver_schema}')
+        FROM {info_db}.INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = UPPER('{schema_only}')
           AND TABLE_NAME   = UPPER('{silver_table}')
     """).collect()
     columns_list = col_rows[0][0] if col_rows and col_rows[0][0] else 'unknown'
@@ -145,15 +158,87 @@ def get_silver_metadata(session, current_db: str, silver_schema: str, silver_tab
     directives_ctx = '\n'.join(r[0] for r in dir_rows) if dir_rows else ''
     return columns_list, directives_ctx
 
+DATA_VAULT_INSTRUCTIONS = """
+DATA VAULT 2.0 PATTERN — generate CTAS statements (CREATE OR REPLACE TABLE ... AS SELECT FROM {silver_fqn}).
+All hash keys computed in the SELECT, never as DDL DEFAULT expressions.
+
+1. HUB table ({gold_name_hub}) — business keys + hash key:
+   CREATE OR REPLACE TABLE {gold_name_hub} AS
+   SELECT
+     SHA2_BINARY(CONCAT(<bk_col1>, COALESCE(<bk_col2>,''))::VARCHAR) AS <TABLE>_HK,
+     <bk_col1>, <bk_col2>,          -- business key columns only
+     CURRENT_TIMESTAMP() AS LOAD_DTS,
+     'ATS' AS RECORD_SOURCE
+   FROM {silver_fqn}
+
+2. SATELLITE table ({gold_name_sat}) — descriptive attributes + hashdiff:
+   CREATE OR REPLACE TABLE {gold_name_sat} AS
+   SELECT
+     SHA2_BINARY(CONCAT(<bk_col1>, COALESCE(<bk_col2>,''))::VARCHAR) AS <TABLE>_HK,
+     CURRENT_TIMESTAMP() AS LOAD_DTS,
+     SHA2_BINARY(CONCAT(<desc_col1>, COALESCE(<desc_col2>,''), ...)::VARCHAR) AS HASHDIFF,
+     <all remaining descriptive columns>
+   FROM {silver_fqn}
+
+3. LINK table (only if clear FK relationship exists in columns):
+   CREATE OR REPLACE TABLE <TABLE_A>_<TABLE_B>_LNK AS
+   SELECT DISTINCT
+     SHA2_BINARY(CONCAT(<tableA_bk>)::VARCHAR) AS <TABLE_A>_HK,
+     SHA2_BINARY(CONCAT(<tableB_bk>)::VARCHAR) AS <TABLE_B>_HK,
+     CURRENT_TIMESTAMP() AS LOAD_DTS,
+     'ATS' AS RECORD_SOURCE
+   FROM {silver_fqn}
+
+CRITICAL RULES:
+- Use CREATE OR REPLACE TABLE ... AS SELECT FROM {silver_fqn} (CTAS only, no empty DDL)
+- Use ONLY columns from AVAILABLE COLUMNS — never invent column names
+- Cast CONCAT arguments: CONCAT(col::VARCHAR, col2::VARCHAR)
+- Separate each statement with a semicolon
+- No PRIMARY KEY or CONSTRAINT clauses (not supported in CTAS)
+"""
+
 def build_gold_prompt(silver_fqn: str, columns_list: str, contracts_ctx: str,
                       directives_ctx: str, gold_name: str,
-                      is_dt: bool, target_lag: str, active_wh: str) -> str:
+                      is_dt: bool, target_lag: str, active_wh: str,
+                      gold_output_mode: str = 'FLAT') -> str:
     fallback_directive = 'Build a clean analytical view with derived metrics'
     base = (
         f"SILVER TABLE: {silver_fqn}\n"
         f"AVAILABLE COLUMNS (use ONLY these, never invent others):\n{columns_list}\n\n"
         f"SCHEMA CONTRACTS:\n{contracts_ctx or 'None'}\n\n"
         f"DIRECTIVES:\n{directives_ctx or fallback_directive}\n\n"
+    )
+
+    if gold_output_mode == 'DATA_VAULT':
+        tbl_base = gold_name.replace('_ANALYTICS', '')
+        gold_name_hub = tbl_base + '_HUB'
+        gold_name_sat = tbl_base + '_SAT'
+        dv_instructions = DATA_VAULT_INSTRUCTIONS.format(
+            gold_name_hub=gold_name_hub, gold_name_sat=gold_name_sat,
+            silver_fqn=silver_fqn
+        )
+        return (
+            f"You are a Snowflake SQL expert building Data Vault 2.0 tables.\n\n{base}"
+            f"{dv_instructions}\n"
+            f"OUTPUT: Raw Snowflake SQL only — no markdown fences, no explanations.\n"
+            f"Generate the Hub, Satellite, and optionally Link CREATE TABLE statements "
+            f"for source table: {silver_fqn}"
+        )
+
+    if gold_output_mode == 'STAR_SCHEMA':
+        return (
+            f"You are a Snowflake SQL expert building a Star Schema Gold layer.\n\n{base}"
+            f"REQUIREMENTS:\n"
+            f"1. Create a FACT table ({gold_name}) with numeric measures and FK surrogate keys.\n"
+            f"2. Create one DIMENSION table per logical entity (e.g. DIM_PRODUCT, DIM_DATE).\n"
+            f"3. Use ONLY columns from AVAILABLE COLUMNS above.\n"
+            f"4. Use ASCII operators: <= not ≤, >= not ≥.\n"
+            f"5. Separate each CREATE TABLE with a semicolon.\n\n"
+            f"OUTPUT: Raw Snowflake SQL only — no markdown fences, no explanations."
+        )
+
+    # Default: FLAT or ONE_BIG_TABLE
+    requirements = (
         f"REQUIREMENTS:\n"
         f"1. Never use SELECT * — explicitly list every column by name.\n"
         f"2. Include at least 3 derived columns (DATEDIFF, CASE WHEN, COALESCE, arithmetic).\n"
@@ -163,7 +248,7 @@ def build_gold_prompt(silver_fqn: str, columns_list: str, contracts_ctx: str,
     )
     if is_dt:
         return (
-            f"You are a Snowflake SQL expert building Gold analytical Dynamic Tables.\n\n{base}"
+            f"You are a Snowflake SQL expert building Gold analytical Dynamic Tables.\n\n{base}{requirements}"
             f"6. CLUSTER BY goes inside the CREATE statement before AS, not in a separate ALTER.\n"
             f"7. Do NOT end with a semicolon.\n\n"
             f"OUTPUT: A single raw Snowflake SQL statement — no markdown, no explanation.\n"
@@ -174,7 +259,7 @@ def build_gold_prompt(silver_fqn: str, columns_list: str, contracts_ctx: str,
             f"AS SELECT ... FROM {silver_fqn}"
         )
     return (
-        f"You are a Snowflake SQL expert building Gold analytical tables.\n\n{base}"
+        f"You are a Snowflake SQL expert building Gold analytical tables.\n\n{base}{requirements}"
         f"6. CLUSTER BY must be in a separate ALTER TABLE statement after the CREATE.\n\n"
         f"OUTPUT: Raw Snowflake SQL only — no markdown fences, no explanations.\n"
         f"Statement 1: CREATE OR REPLACE TABLE {gold_name} AS SELECT ... FROM {silver_fqn}\n"
@@ -186,52 +271,6 @@ def clean_ddl(raw: str) -> str:
     ci = ddl.upper().find('CREATE')
     return ddl[ci:] if ci > 0 else ddl
 
-def check_gold_conflict(session, current_db: str, gold_schema: str, gold_table: str) -> str:
-    """
-    Returns 'VIEW', 'DYNAMIC_TABLE', 'EMPTY_TABLE', or 'SAFE'.
-    SAFE means: does not exist, or exists with rows (handled by brownfield/overwrite logic).
-    """
-    try:
-        type_rows = session.sql(f"""
-            SELECT COALESCE(MAX(TABLE_TYPE), 'NOT_FOUND')
-            FROM {current_db}.INFORMATION_SCHEMA.TABLES
-            WHERE UPPER(TABLE_SCHEMA) = UPPER('{gold_schema}')
-              AND UPPER(TABLE_NAME)   = UPPER('{gold_table}')
-        """).collect()
-        obj_type = type_rows[0][0] if type_rows else 'NOT_FOUND'
-    except Exception:
-        return 'SAFE'
-
-    if obj_type == 'NOT_FOUND':
-        return 'SAFE'
-    if obj_type == 'VIEW':
-        return 'VIEW'
-
-    # Check for Dynamic Table
-    try:
-        dt_rows = session.sql(f"""
-            SELECT COUNT(*) FROM {current_db}.INFORMATION_SCHEMA.DYNAMIC_TABLES
-            WHERE UPPER(TABLE_SCHEMA) = UPPER('{gold_schema}')
-              AND UPPER(TABLE_NAME)   = UPPER('{gold_table}')
-        """).collect()
-        if dt_rows and dt_rows[0][0] > 0:
-            return 'DYNAMIC_TABLE'
-    except Exception:
-        pass
-
-    # Check row count — empty regular table may belong to another pipeline
-    try:
-        cnt_rows = session.sql(
-            f"SELECT COUNT(*) FROM {current_db}.{gold_schema}.{gold_table} LIMIT 1"
-        ).collect()
-        if cnt_rows and cnt_rows[0][0] == 0:
-            return 'EMPTY_TABLE'
-    except Exception:
-        pass
-
-    return 'SAFE'
-
-
 def run(session, dry_run=True, max_tables=10):
     model_rows   = session.sql(
         "SELECT primary_model FROM AGENT_FRAMEWORK.MODEL_CONFIG WHERE config_key = 'default' LIMIT 1"
@@ -242,18 +281,13 @@ def run(session, dry_run=True, max_tables=10):
 
     ctx_rows      = session.sql(
         "SELECT COALESCE(pipeline_type,'CTAS'), COALESCE(target_lag,'1 hour'), "
-        "COALESCE(conflict_fallback_schema, '') "
+        "COALESCE(gold_output_mode,'FLAT') "
         "FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT WHERE context_id = 1"
     ).collect()
-    pipeline_type           = ctx_rows[0][0] if ctx_rows else 'CTAS'
-    target_lag              = ctx_rows[0][1] if ctx_rows else '1 hour'
-    conflict_fallback_schema = ctx_rows[0][2] if ctx_rows else ''
-    is_dt                   = (pipeline_type == 'DYNAMIC_TABLE')
-
-    gold_schema_default = 'GOLD'
-    # Auto-derive fallback schema: GOLD_STAGING if not configured
-    if not conflict_fallback_schema:
-        conflict_fallback_schema = gold_schema_default + '_STAGING'
+    pipeline_type    = ctx_rows[0][0] if ctx_rows else 'CTAS'
+    target_lag       = ctx_rows[0][1] if ctx_rows else '1 hour'
+    gold_output_mode = ctx_rows[0][2] if ctx_rows else 'FLAT'
+    is_dt            = (pipeline_type == 'DYNAMIC_TABLE')
 
     contracts_ctx = (session.sql(
         "SELECT AGENT_FRAMEWORK.CONTRACTS_AS_PROMPT_CONTEXT('GOLD')"
@@ -271,24 +305,24 @@ def run(session, dry_run=True, max_tables=10):
     for row in gaps_rows:
         silver_table  = row[0]
         silver_schema = row[1]
-        silver_fqn    = f"{current_db}.{silver_schema}.{silver_table}"
-        gold_tbl_base = f"{silver_table}_ANALYTICS"
-        gold_name     = f"{gold_schema_default}.{gold_tbl_base}"
-
-        # ── Conflict check: redirect if target Gold object is a VIEW,
-        #    DYNAMIC TABLE, or empty table owned by another pipeline
-        conflict = check_gold_conflict(session, current_db, gold_schema_default, gold_tbl_base)
-        effective_gold_schema = gold_schema_default
-        redirected = False
-        if conflict in ('VIEW', 'DYNAMIC_TABLE', 'EMPTY_TABLE'):
-            effective_gold_schema = conflict_fallback_schema
-            gold_name             = f"{effective_gold_schema}.{gold_tbl_base}"
-            redirected            = True
+        # silver_schema may be 'DB.SCHEMA' — use as-is, don't prepend current_db
+        silver_fqn    = f"{silver_schema}.{silver_table}"
+        # derive Gold output schema from pipeline context output_schema
+        ctx_schema_rows = session.sql(
+            "SELECT COALESCE(NULLIF(output_schema,''),'GOLD') FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT WHERE context_id=1"
+        ).collect()
+        output_schema = ctx_schema_rows[0][0] if ctx_schema_rows else 'GOLD'
+        # replace trailing schema segment with GOLD (e.g. ATS_V3_TEST.SILVER -> ATS_V3_TEST.GOLD)
+        parts = output_schema.split('.')
+        gold_db     = parts[0] if len(parts) > 1 else current_db
+        gold_schema_name = 'GOLD'
+        gold_name   = f"{gold_db}.{gold_schema_name}.{silver_table}_ANALYTICS"
 
         columns_list, directives_ctx = get_silver_metadata(session, current_db, silver_schema, silver_table)
 
         prompt = build_gold_prompt(silver_fqn, columns_list, contracts_ctx,
-                                   directives_ctx, gold_name, is_dt, target_lag, active_wh)
+                                   directives_ctx, gold_name, is_dt, target_lag, active_wh,
+                                   gold_output_mode)
         prompt_escaped = prompt.replace("'", "''")
         llm_rows = session.sql(
             f"SELECT SNOWFLAKE.CORTEX.COMPLETE('{active_model}', '{prompt_escaped}')"
@@ -314,25 +348,22 @@ def run(session, dry_run=True, max_tables=10):
 
                 match        = re.search(r'TABLE\s+([\w\.]+)', working_ddl, re.IGNORECASE)
                 extracted    = match.group(1).strip() if match else gold_name
-                gold_tbl_name = extracted.split('.')[-1]
-                gold_schema   = extracted.split('.')[-2] if '.' in extracted else 'GOLD'
+                parts       = extracted.split('.')
+                gold_schema = '.'.join(parts[:-1]) if len(parts) >= 3 else (parts[-2] if len(parts) == 2 else 'GOLD')
+                gold_tbl_name = parts[-1]
 
                 session.sql(f"""
                     UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
-                    SET gold_table = '{gold_tbl_name}', gold_schema = '{effective_gold_schema}',
+                    SET gold_table = '{gold_tbl_name}', gold_schema = '{gold_schema}',
                         gold_status = 'COMPLETE', last_refreshed_at = CURRENT_TIMESTAMP(),
                         updated_at = CURRENT_TIMESTAMP()
                     WHERE UPPER(silver_table) = UPPER('{silver_table}')
                 """).collect()
 
-                redirect_note = f' [REDIRECTED to {effective_gold_schema} — conflict={conflict}]' if redirected else ''
                 proposals.append({'silver_table': silver_fqn, 'proposed_ddl': working_ddl,
-                                   'executed': True, 'redirected': redirected,
-                                   'conflict_reason': conflict if redirected else None,
+                                   'executed': True,
                                    'exec_result': {'status': 'SUCCESS', 'gold_table': extracted,
-                                                   'gold_schema': effective_gold_schema,
-                                                   'attempts': retry_count + 1,
-                                                   'redirect_note': redirect_note}})
+                                                   'attempts': retry_count + 1}})
                 executed += 1
                 success = True
                 break

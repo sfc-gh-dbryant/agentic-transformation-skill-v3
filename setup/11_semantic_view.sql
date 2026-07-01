@@ -9,9 +9,8 @@ USE DATABASE IDENTIFIER($TARGET_DB);
 
 SET SV_SCHEMA = $TARGET_DB || '.AGENT_FRAMEWORK';
 
-CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
-    $SV_SCHEMA,
-    $$
+-- Use SET + REPLACE so $TARGET_DB substitutes into YAML ($$-block prevents variable expansion)
+SET sv_yaml = REPLACE('
 name: ats_pipeline_semantics
 description: ATS v3 Pipeline Semantic View. Enables natural language queries over
   the agentic data transformation pipeline state. Covers Bronze to Silver to Gold
@@ -246,7 +245,7 @@ verified_queries:
   - name: 1;1
     question: What percentage of tables have completed Silver transformation?
     sql: SELECT COUNT(DISTINCT BRONZE_TABLE) AS total_tables, COUNT_IF(SILVER_STATUS
-      = 'COMPLETE') AS silver_complete, ROUND(COUNT_IF(SILVER_STATUS = 'COMPLETE')
+      = ''COMPLETE'') AS silver_complete, ROUND(COUNT_IF(SILVER_STATUS = ''COMPLETE'')
       * 100.0 / NULLIF(COUNT(*), 0), 1) AS silver_pct FROM table_lineage_map
     verified_at: 1781813022
     verified_by: Semantic Model Generator
@@ -275,7 +274,6 @@ verified_queries:
     sql: SELECT STATUS, COUNT(*) AS run_count FROM workflow_executions GROUP BY STATUS
     verified_at: 1781813022
     verified_by: Semantic Model Generator
+', 'database: ATS_V3', 'database: ' || $TARGET_DB);
 
-$$,
-    FALSE
-);
+EXECUTE IMMEDIATE 'CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(''' || $SV_SCHEMA || ''', ''' || $sv_yaml || ''', FALSE)';
