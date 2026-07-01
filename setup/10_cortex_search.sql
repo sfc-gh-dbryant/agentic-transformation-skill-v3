@@ -62,7 +62,16 @@ CREATE OR REPLACE VIEW AGENT_FRAMEWORK.ATS_KNOWLEDGE_CORPUS AS
       COALESCE('.' || target_column, '') ||
       ' (' || relationship_type || ', ' || ROUND(confidence * 100)::VARCHAR || '% confidence)'
   FROM AGENT_FRAMEWORK.SCHEMA_RELATIONSHIPS
-  WHERE confidence >= 0.65;
+  WHERE confidence >= 0.65
+
+  UNION ALL
+
+  SELECT
+      'document',
+      doc_name,
+      COALESCE(confidence_bucket, 'high'),
+      '[DOC:' || UPPER(doc_type) || '] ' || doc_name || ': ' || text_content
+  FROM AGENT_FRAMEWORK.DOCUMENT_CONTEXT_ITEMS;
 
 -- ---------------------------------------------------------------------------
 -- ATS_KNOWLEDGE_SEARCH — Cortex Search service over the corpus view
