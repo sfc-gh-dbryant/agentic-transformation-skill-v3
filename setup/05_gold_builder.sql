@@ -158,28 +158,42 @@ def get_silver_metadata(session, current_db: str, silver_schema: str, silver_tab
     return columns_list, directives_ctx
 
 DATA_VAULT_INSTRUCTIONS = """
-DATA VAULT 2.0 PATTERN — generate three separate CREATE TABLE statements:
+DATA VAULT 2.0 PATTERN — generate CTAS statements (CREATE OR REPLACE TABLE ... AS SELECT FROM {silver_fqn}).
+All hash keys computed in the SELECT, never as DDL DEFAULT expressions.
 
-1. HUB table ({gold_name_hub}):
-   - Hash key column: <TABLE>_HK BINARY(32) as SHA2_BINARY(business_key_columns)
-   - Business key column(s) from AVAILABLE COLUMNS
-   - LOAD_DTS TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
-   - RECORD_SOURCE VARCHAR DEFAULT 'ATS'
-   - PRIMARY KEY on <TABLE>_HK
+1. HUB table ({gold_name_hub}) — business keys + hash key:
+   CREATE OR REPLACE TABLE {gold_name_hub} AS
+   SELECT
+     SHA2_BINARY(CONCAT(<bk_col1>, COALESCE(<bk_col2>,''))::VARCHAR) AS <TABLE>_HK,
+     <bk_col1>, <bk_col2>,          -- business key columns only
+     CURRENT_TIMESTAMP() AS LOAD_DTS,
+     'ATS' AS RECORD_SOURCE
+   FROM {silver_fqn}
 
-2. SATELLITE table ({gold_name_sat}):
-   - <TABLE>_HK BINARY(32) (FK to Hub)
-   - LOAD_DTS TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
-   - HASHDIFF BINARY(32) as SHA2_BINARY of all descriptive columns
-   - All remaining descriptive columns from AVAILABLE COLUMNS
-   - PRIMARY KEY on (<TABLE>_HK, LOAD_DTS)
+2. SATELLITE table ({gold_name_sat}) — descriptive attributes + hashdiff:
+   CREATE OR REPLACE TABLE {gold_name_sat} AS
+   SELECT
+     SHA2_BINARY(CONCAT(<bk_col1>, COALESCE(<bk_col2>,''))::VARCHAR) AS <TABLE>_HK,
+     CURRENT_TIMESTAMP() AS LOAD_DTS,
+     SHA2_BINARY(CONCAT(<desc_col1>, COALESCE(<desc_col2>,''), ...)::VARCHAR) AS HASHDIFF,
+     <all remaining descriptive columns>
+   FROM {silver_fqn}
 
-3. For each clear foreign-key relationship found in AVAILABLE COLUMNS, a LINK table:
-   - <TABLE_A>_<TABLE_B>_LNK with both HK columns + LOAD_DTS + RECORD_SOURCE
-   (skip if no FK relationships obvious)
+3. LINK table (only if clear FK relationship exists in columns):
+   CREATE OR REPLACE TABLE <TABLE_A>_<TABLE_B>_LNK AS
+   SELECT DISTINCT
+     SHA2_BINARY(CONCAT(<tableA_bk>)::VARCHAR) AS <TABLE_A>_HK,
+     SHA2_BINARY(CONCAT(<tableB_bk>)::VARCHAR) AS <TABLE_B>_HK,
+     CURRENT_TIMESTAMP() AS LOAD_DTS,
+     'ATS' AS RECORD_SOURCE
+   FROM {silver_fqn}
 
-Use ONLY columns from AVAILABLE COLUMNS. No invented columns.
-Separate each CREATE TABLE with a semicolon.
+CRITICAL RULES:
+- Use CREATE OR REPLACE TABLE ... AS SELECT FROM {silver_fqn} (CTAS only, no empty DDL)
+- Use ONLY columns from AVAILABLE COLUMNS — never invent column names
+- Cast CONCAT arguments: CONCAT(col::VARCHAR, col2::VARCHAR)
+- Separate each statement with a semicolon
+- No PRIMARY KEY or CONSTRAINT clauses (not supported in CTAS)
 """
 
 def build_gold_prompt(silver_fqn: str, columns_list: str, contracts_ctx: str,
@@ -199,7 +213,8 @@ def build_gold_prompt(silver_fqn: str, columns_list: str, contracts_ctx: str,
         gold_name_hub = tbl_base + '_HUB'
         gold_name_sat = tbl_base + '_SAT'
         dv_instructions = DATA_VAULT_INSTRUCTIONS.format(
-            gold_name_hub=gold_name_hub, gold_name_sat=gold_name_sat
+            gold_name_hub=gold_name_hub, gold_name_sat=gold_name_sat,
+            silver_fqn=silver_fqn
         )
         return (
             f"You are a Snowflake SQL expert building Data Vault 2.0 tables.\n\n{base}"
