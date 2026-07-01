@@ -2202,10 +2202,9 @@ snow stage get @AGENT_FRAMEWORK.DCM_OUTPUT ./dcm_project -c <connection>
 def render_documents_tab():
     st.subheader("Knowledge Documents")
     st.markdown(
-        '<div class="info-strip">Upload domain documents (naming conventions, ERDs, data dictionaries) '
-        'so the Planner retrieves them via Cortex Search before every LLM batch. '
-        'Zero changes to the Planner SP — documents are indexed into '
-        '<code>ATS_KNOWLEDGE_CORPUS</code> and retrieved automatically.</div>',
+        '<div class="info-strip">Upload domain documents <strong>before running the workflow</strong> — business rules, naming conventions, ERDs, data dictionaries. '
+        'The Planner retrieves them via Cortex Search before every LLM batch. '
+        'Documents are indexed into <code>ATS_KNOWLEDGE_CORPUS</code> and applied automatically.</div>',
         unsafe_allow_html=True
     )
 
@@ -2346,8 +2345,8 @@ def render_documents_tab():
 def main():
     render_sidebar()
 
-    TAB_NAMES  = ["⚙️ Setup", "💡 Context", "📐 Contracts", "🎯 Directives", "🤖 Workflow", "🏆 Analytics Builder", "🗂️ Registry", "📊 Observe", "🏷️ Partner Routing", "📦 DCM Export", "📄 Documents"]
-    TAB_RENDER = [render_setup_tab, render_context_tab, render_contracts_tab, render_directives_tab, render_workflow_tab, render_gold_tab, render_registry_tab, render_observability_tab, render_banner_tab, render_dcm_tab, render_documents_tab]
+    TAB_NAMES  = ["⚙️ Setup", "💡 Context", "📄 Documents", "📐 Contracts", "🎯 Directives", "🤖 Workflow", "🏆 Analytics Builder", "🗂️ Registry", "📊 Observe", "🏷️ Partner Routing", "📦 DCM Export"]
+    TAB_RENDER = [render_setup_tab, render_context_tab, render_documents_tab, render_contracts_tab, render_directives_tab, render_workflow_tab, render_gold_tab, render_registry_tab, render_observability_tab, render_banner_tab, render_dcm_tab]
 
     if "active_tab" not in st.session_state:
         st.session_state["active_tab"] = 0
