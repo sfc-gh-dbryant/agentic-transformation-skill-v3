@@ -2210,6 +2210,7 @@ def render_documents_tab():
     )
 
     doc_type_options = {
+        "Business Rules":      "business_rules",
         "Naming Convention":   "naming_convention",
         "Data Dictionary":     "data_dictionary",
         "ERD / Schema Map":    "erd",
