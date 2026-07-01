@@ -44,6 +44,14 @@ def run(session, ddl_statement, source_silver_table=None):
 
     while retry_count < max_retries:
         try:
+            # Ensure Gold schema exists before executing DDL
+            tbl_match = re.search(r'TABLE\s+([\w\.]+)', working_ddl, re.IGNORECASE)
+            if tbl_match:
+                tbl_parts = tbl_match.group(1).strip().split('.')
+                if len(tbl_parts) >= 2:
+                    gold_db_schema = '.'.join(tbl_parts[:-1])
+                    session.sql(f"CREATE SCHEMA IF NOT EXISTS {gold_db_schema}").collect()
+
             stmts = [s.strip() for s in working_ddl.split(';') if len(s.strip()) > 3]
             for stmt in stmts:
                 session.sql(stmt).collect()
