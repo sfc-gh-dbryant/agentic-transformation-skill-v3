@@ -267,9 +267,10 @@ _NAV_GROUPS = [
     ("Pipeline", [
         (0,  "⚙️",  "Setup"),
         (5,  "💡",  "Context"),
-        (6,  "📐",  "Contracts"),
-        (7,  "🎯",  "Directives"),
-        (8,  "🤖",  "Workflow"),
+        (6,  "📄",  "Documents"),
+        (7,  "📐",  "Contracts"),
+        (8,  "🎯",  "Directives"),
+        (9,  "🤖",  "Workflow"),
     ]),
     ("Cortex Agents", [
         (1,  "🏠",  "Agent Hub"),
@@ -278,14 +279,13 @@ _NAV_GROUPS = [
         (4,  "🔧",  "Tool Inspector"),
     ]),
     ("Analytics", [
-        (9,  "🏆",  "Analytics Builder"),
-        (10, "🗂️",  "Registry"),
-        (11, "📊",  "Observe"),
+        (10, "🏆",  "Analytics Builder"),
+        (11, "🗂️",  "Registry"),
+        (12, "📊",  "Observe"),
     ]),
     ("Ops & Export", [
-        (12, "🏷️",  "Partner Routing"),
-        (13, "📦",  "DCM Export"),
-        (14, "📄",  "Documents"),
+        (13, "🏷️",  "Partner Routing"),
+        (14, "📦",  "DCM Export"),
     ]),
 ]
 
