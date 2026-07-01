@@ -70,8 +70,8 @@ BEGIN
             bronze_tbl := current_result:table::VARCHAR;
 
             SELECT bronze_database || '.' || bronze_schema || '.' || bronze_table,
-                   :output_db || '.' || silver_schema   || '.' || silver_table,
-                   silver_schema,
+                   silver_schema || '.' || silver_table,
+                   SPLIT_PART(silver_schema, '.', -1),
                    silver_table
             INTO   :bronze_tbl, :silver_tbl,
                    :silver_schema_name, :silver_table_name
