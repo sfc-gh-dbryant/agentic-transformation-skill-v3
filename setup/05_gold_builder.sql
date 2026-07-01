@@ -58,8 +58,9 @@ def run(session, ddl_statement, source_silver_table=None):
 
             match = re.search(r'TABLE\s+([\w\.]+)', working_ddl, re.IGNORECASE)
             extracted_table = match.group(1).strip() if match else ''
-            gold_table_name = extracted_table.split('.')[-1]
-            gold_schema     = extracted_table.split('.')[-2] if '.' in extracted_table else 'GOLD'
+            parts       = extracted_table.split('.')
+            gold_schema = '.'.join(parts[:-1]) if len(parts) >= 3 else (parts[-2] if len(parts) == 2 else 'GOLD')
+            gold_table_name = parts[-1]
 
             silver_tbl = source_silver_table
             if not silver_tbl:
@@ -347,8 +348,9 @@ def run(session, dry_run=True, max_tables=10):
 
                 match        = re.search(r'TABLE\s+([\w\.]+)', working_ddl, re.IGNORECASE)
                 extracted    = match.group(1).strip() if match else gold_name
-                gold_tbl_name = extracted.split('.')[-1]
-                gold_schema   = extracted.split('.')[-2] if '.' in extracted else 'GOLD'
+                parts       = extracted.split('.')
+                gold_schema = '.'.join(parts[:-1]) if len(parts) >= 3 else (parts[-2] if len(parts) == 2 else 'GOLD')
+                gold_tbl_name = parts[-1]
 
                 session.sql(f"""
                     UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
