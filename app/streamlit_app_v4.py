@@ -159,7 +159,7 @@ def run_call_param(proc: str, param: str, param2: str = None) -> dict:
 
 
 def framework_exists() -> bool:
-    df = run_query("SHOW TABLES LIKE 'MODEL_CONFIG' IN SCHEMA AGENT_FRAMEWORK")
+    df = run_query(f"SHOW TABLES LIKE 'MODEL_CONFIG' IN SCHEMA {_FW_DB}.AGENT_FRAMEWORK")
     return not df.empty
 
 
@@ -1313,7 +1313,13 @@ def _build_table_selector() -> str:
     if selected:
         cleaned = [t.replace(" [done]", "") for t in selected]
         return "ARRAY_CONSTRUCT(" + ", ".join(f"'{t}'" for t in cleaned) + ")"
-    pending = [t for t in all_tables if "[done]" not in t]
+    cleaned_all = [t.replace(" [done]", "") for t in all_tables]
+    if show_all:
+        return "ARRAY_CONSTRUCT(" + ", ".join(f"'{t}'" for t in cleaned_all) + ")"
+    pending = [t for t in cleaned_all if t in [
+        f"{r['BRONZE_DATABASE']}.{r['BRONZE_SCHEMA']}.{r['BRONZE_TABLE']}"
+        for _, r in all_tables_df[all_tables_df['SILVER_STATUS'] != 'COMPLETE'].iterrows()
+    ]]
     return "ARRAY_CONSTRUCT(" + ", ".join(f"'{t}'" for t in pending) + ")"
 
 
@@ -2822,7 +2828,7 @@ def render_agent_hub_tab():
     st.markdown('<div class="info-strip">6 agents deployed to <b>AGENT_FRAMEWORK</b>. Each wraps a set of ATS_TOOL_* stored procedures.</div>', unsafe_allow_html=True)
 
     try:
-        agents_df = session.sql("SHOW AGENTS IN SCHEMA AGENT_FRAMEWORK").to_pandas()
+        agents_df = session.sql(f"SHOW AGENTS IN SCHEMA {_FW_DB}.AGENT_FRAMEWORK").to_pandas()
         # Snowpark returns SHOW columns with surrounding quotes e.g. '"name"'
         agents_df.columns = [c.strip('"').lower() for c in agents_df.columns]
         live_names = set(agents_df["name"].str.upper().tolist())
