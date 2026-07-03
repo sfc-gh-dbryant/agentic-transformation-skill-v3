@@ -30,11 +30,27 @@ BEGIN
     IF (tables_list IS NOT NULL) THEN
         resolved_tables := tables_list;
     ELSE
-        SELECT ARRAY_AGG(
-            bronze_database || '.' || bronze_schema || '.' || bronze_table
-        ) INTO :resolved_tables
-        FROM AGENT_FRAMEWORK.SILVER_GAPS
-        LIMIT 50;
+        -- When overwrite_existing=TRUE, include all registered tables;
+        -- otherwise only tables with no Silver coverage yet (SILVER_GAPS).
+        LET overwrite_flag BOOLEAN DEFAULT FALSE;
+        SELECT COALESCE(overwrite_existing, FALSE)
+            INTO :overwrite_flag
+            FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT
+            WHERE context_id = 1;
+
+        IF (:overwrite_flag) THEN
+            SELECT ARRAY_AGG(
+                bronze_database || '.' || bronze_schema || '.' || bronze_table
+            ) INTO :resolved_tables
+            FROM AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
+            LIMIT 50;
+        ELSE
+            SELECT ARRAY_AGG(
+                bronze_database || '.' || bronze_schema || '.' || bronze_table
+            ) INTO :resolved_tables
+            FROM AGENT_FRAMEWORK.SILVER_GAPS
+            LIMIT 50;
+        END IF;
     END IF;
 
     INSERT INTO AGENT_FRAMEWORK.WORKFLOW_EXECUTIONS (

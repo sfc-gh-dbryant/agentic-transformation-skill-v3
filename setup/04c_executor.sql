@@ -459,8 +459,10 @@ DIRECTIVES:
 
                     UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
                     SET silver_table      = SPLIT_PART(TRIM(REGEXP_SUBSTR(:generated_sql, 'TABLE\\s+([\\w\\.]+)', 1, 1, 'ie', 1)), '.', -1),
-                        silver_schema     = SPLIT_PART(:effective_target_fqn, '.', -2),
+                        silver_schema     = :output_schema,
                         silver_status     = 'COMPLETE',
+                        row_count_bronze  = (SELECT COUNT(*) FROM IDENTIFIER(:cur_source_table)),
+                        row_count_silver  = (SELECT COUNT(*) FROM IDENTIFIER(:effective_target_fqn)),
                         last_execution_id = :execution_id,
                         last_refreshed_at = CURRENT_TIMESTAMP(),
                         updated_at        = CURRENT_TIMESTAMP()
@@ -501,8 +503,10 @@ DIRECTIVES:
                     success_count := success_count + 1;
                     UPDATE AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
                     SET silver_table      = :target_table_name,
-                        silver_schema     = SPLIT_PART(:effective_target_fqn, '.', -2),
+                        silver_schema     = :output_schema,
                         silver_status     = 'COMPLETE',
+                        row_count_bronze  = (SELECT COUNT(*) FROM IDENTIFIER(:cur_source_table)),
+                        row_count_silver  = (SELECT COUNT(*) FROM IDENTIFIER(:effective_target_fqn)),
                         last_execution_id = :execution_id,
                         last_refreshed_at = CURRENT_TIMESTAMP(),
                         updated_at        = CURRENT_TIMESTAMP()

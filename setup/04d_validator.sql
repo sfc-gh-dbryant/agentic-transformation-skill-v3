@@ -70,7 +70,8 @@ BEGIN
             bronze_tbl := current_result:table::VARCHAR;
 
             SELECT bronze_database || '.' || bronze_schema || '.' || bronze_table,
-                   silver_schema || '.' || silver_table,
+                   CASE WHEN CONTAINS(silver_schema, '.') THEN silver_schema || '.' || silver_table
+                        ELSE :output_db || '.' || silver_schema || '.' || silver_table END,
                    SPLIT_PART(silver_schema, '.', -1),
                    silver_table
             INTO   :bronze_tbl, :silver_tbl,

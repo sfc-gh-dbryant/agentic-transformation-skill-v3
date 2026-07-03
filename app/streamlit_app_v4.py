@@ -39,6 +39,61 @@ except SnowparkSessionException:
     st.error("No active Snowflake session. Deploy this app as a Streamlit in Snowflake app.")
     st.stop()
 
+# Auto-detect and set the framework database so CURRENT_DATABASE() resolves
+# to whichever ATS_* DB has AGENT_FRAMEWORK — handles SPCS session defaulting
+# to a different database than the deployment target.
+def _detect_framework_db() -> str:
+    """Find and set the framework database. Returns the DB name."""
+    # 1. SHOW STREAMLITS — most reliable for SPCS deployments
+    try:
+        rows = session.sql(
+            "SHOW STREAMLITS LIKE 'AGENTIC_TRANSFORMATION_SKILL_V4'"
+        ).collect()
+        if rows:
+            return rows[0]["database_name"]
+    except Exception:
+        pass
+    # 2. Check current DB
+    try:
+        current = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
+        r = session.sql(
+            f"SHOW TABLES LIKE 'MODEL_CONFIG' IN SCHEMA {current}.AGENT_FRAMEWORK"
+        ).collect()
+        if r:
+            return current
+    except Exception:
+        pass
+    # 3. Scan ATS_* in reverse order (ATS_V4 before ATS_V3)
+    try:
+        dbs = sorted(
+            [row["name"] for row in session.sql("SHOW DATABASES LIKE 'ATS%'").collect()],
+            reverse=True,
+        )
+        for db in dbs:
+            try:
+                r = session.sql(
+                    f"SHOW TABLES LIKE 'MODEL_CONFIG' IN SCHEMA {db}.AGENT_FRAMEWORK"
+                ).collect()
+                if r:
+                    return db
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
+
+# Detect once and cache in session_state so it survives Streamlit re-runs
+if "_fw_db" not in st.session_state:
+    _fw_db = _detect_framework_db()
+    st.session_state["_fw_db"] = _fw_db
+    try:
+        session.sql(f"USE DATABASE {_fw_db}").collect()
+        session.sql(f"USE SCHEMA {_fw_db}.AGENT_FRAMEWORK").collect()
+    except Exception:
+        pass
+
+_FW_DB: str = st.session_state["_fw_db"]
+
 st.set_page_config(page_title="ATS v4 — Cortex Agents", page_icon="🤖", layout="wide")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,9 +106,14 @@ def _db_context():
     return {"db": row["DB"], "role": row["ROLE"], "user": row["USR"], "wh": row["WH"]}
 
 
+def _qualify_sql(sql: str) -> str:
+    import re
+    return re.sub(r'(?<![\w.])AGENT_FRAMEWORK\.', f'{_FW_DB}.AGENT_FRAMEWORK.', sql)
+
+
 def run_query(sql: str) -> pd.DataFrame:
     try:
-        return session.sql(sql).to_pandas()
+        return session.sql(_qualify_sql(sql)).to_pandas()
     except Exception as e:
         st.error(f"Query error: {e}")
         return pd.DataFrame()
@@ -61,7 +121,7 @@ def run_query(sql: str) -> pd.DataFrame:
 
 def run_call(sql: str) -> dict:
     try:
-        rows = session.sql(sql).collect()
+        rows = session.sql(_qualify_sql(sql)).collect()
         if rows:
             val = rows[0][0]
             try:
@@ -400,7 +460,7 @@ def render_setup_tab():
         bronze_schema = st.text_input("Bronze Source(s)", value="", placeholder="MY_DATA_DB.BRONZE  or  DB1.BRONZE,DB2.RAW", help="Cross-database (MY_DB.BRONZE), plain schema (BRONZE), or comma-separated multi-source (DB1.BRONZE,DB2.RAW).")
         if st.button("▶ Run Bootstrap", type="primary", use_container_width=True):
             with st.spinner(f"Bootstrapping '{bronze_schema.strip()}'..."):
-                result = run_call(f"CALL AGENT_FRAMEWORK.BOOTSTRAP('{bronze_schema.strip()}')")
+                result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.BOOTSTRAP('{bronze_schema.strip()}')")
             if result.get("status") == "SUCCESS":
                 n = result.get('tables_registered', result.get('bronze_tables', 0))
                 skipped = result.get('sources_skipped', [])
@@ -423,7 +483,7 @@ def render_setup_tab():
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Validate & Set", use_container_width=True):
                 with st.spinner(f"Validating {new_model}..."):
-                    result = run_call(f"CALL AGENT_FRAMEWORK.VALIDATE_MODEL('{new_model}')")
+                    result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.VALIDATE_MODEL('{new_model}')")
                 if result.get("status") == "SUCCESS":
                     st.success(f"Active model updated to: {result.get('model')}")
                     st.cache_data.clear()
@@ -435,7 +495,7 @@ def render_setup_tab():
         bronze_refresh_schema = st.text_input("Bronze Source(s)", value="", key="refresh_schema", placeholder="MY_DATA_DB.BRONZE or DB1.BRONZE,DB2.RAW")
         if st.button("↻ Re-discover Tables"):
             with st.spinner("Scanning INFORMATION_SCHEMA..."):
-                result = run_call(f"CALL AGENT_FRAMEWORK.BOOTSTRAP('{bronze_refresh_schema.strip()}')")
+                result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.BOOTSTRAP('{bronze_refresh_schema.strip()}')")
             st.success(f"Discovery complete: {result.get('tables_registered', result.get('bronze_tables',0))} tables registered")
             st.cache_data.clear()
             st.rerun()
@@ -509,7 +569,7 @@ def render_setup_tab():
         rc1, rc2 = st.columns(2)
         if rc1.button("✓ Confirm Reset", type="primary", use_container_width=True, key="confirm_reset_yes"):
             with st.spinner("Resetting framework..."):
-                result = run_call("CALL AGENT_FRAMEWORK.RESET_FRAMEWORK('YES')")
+                result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.RESET_FRAMEWORK('YES')")
             st.session_state["confirm_reset_framework"] = False
             for key in ["wf_phase_states", "wf_phase_results", "wf_running", "wf_awaiting_approval",
                         "wf_approval_execution_id", "wf_failed", "wf_failure_phase", "wf_failure_error"]:
@@ -691,7 +751,7 @@ def render_context_tab():
             if msg.startswith('ERROR'):
                 st.error(msg)
             else:
-                run_call(f"CALL AGENT_FRAMEWORK.SET_BROWNFIELD_MODE({str(brownfield_mode).upper()})")
+                run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.SET_BROWNFIELD_MODE({str(brownfield_mode).upper()})")
                 st.success("Pipeline context saved.")
         else:
             st.success("Pipeline context saved.")
@@ -777,7 +837,7 @@ def render_contracts_tab():
             cc1, cc2 = st.columns(2)
             if cc1.button("✓ Confirm Reset", type="primary", use_container_width=True):
                 with st.spinner("Reseeding defaults..."):
-                    run_call("CALL AGENT_FRAMEWORK.SEED_DEFAULT_CONTRACTS()")
+                    run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.SEED_DEFAULT_CONTRACTS()")
                 st.session_state["confirm_reset_contracts"] = False
                 st.success("Default contracts merged in.")
                 st.cache_data.clear()
@@ -895,7 +955,7 @@ def render_directives_tab():
 
     if st.button("↺ Reset Directives to Defaults"):
         with st.spinner("Seeding defaults..."):
-            run_call("CALL AGENT_FRAMEWORK.SEED_DEFAULT_DIRECTIVES()")
+            run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.SEED_DEFAULT_DIRECTIVES()")
         st.success("Default directives restored")
         st.cache_data.clear()
         st.rerun()
@@ -928,7 +988,7 @@ def _run_phases(execution_id, skip_phases, diagram_container, phase_descriptions
         status_placeholder.info(f"\u23f3 Running **{phase}**...")
 
         try:
-            result = run_call(f"CALL AGENT_FRAMEWORK.WORKFLOW_{phase}('{execution_id}')")
+            result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.WORKFLOW_{phase}('{execution_id}')")
             st.session_state["wf_phase_results"][phase] = result
 
             if isinstance(result, dict) and result.get("status") == "ERROR" and phase != "REFLECTOR":
@@ -1538,7 +1598,7 @@ def render_workflow_tab():
                 st.rerun()
         with qa2:
             if st.button("\U0001f9f9 Clear Workflow History", use_container_width=True, key="wf_clear"):
-                run_call("CALL AGENT_FRAMEWORK.CLEAR_WORKFLOW_HISTORY()")
+                run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.CLEAR_WORKFLOW_HISTORY()")
                 st.success("Workflow history cleared.")
                 st.cache_data.clear()
                 st.rerun()
@@ -1623,7 +1683,7 @@ def render_gold_tab():
 
         if propose_clicked:
             with st.spinner(f"Agent generating {max_tables} Analytics DDL proposals..."):
-                result = run_call(f"CALL AGENT_FRAMEWORK.BUILD_GOLD_FOR_NEW_TABLES(TRUE, {max_tables})")
+                result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.BUILD_GOLD_FOR_NEW_TABLES(TRUE, {max_tables})")
             proposals = result.get("proposals", []) if isinstance(result, dict) else []
             if proposals:
                 st.session_state["gold_proposals"] = proposals
@@ -1693,7 +1753,7 @@ def render_gold_tab():
         dcm_stage = st.text_input("Output Stage", value=f"@{ctx['db']}.AGENT_FRAMEWORK.AGENT_STAGE")
         if st.button("📦 Export DCM Project", use_container_width=True):
             with st.spinner("Generating DCM project files..."):
-                dcm_result = run_call(f"CALL AGENT_FRAMEWORK.EXPORT_DCM_PROJECT('{dcm_stage}')")
+                dcm_result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.EXPORT_DCM_PROJECT('{dcm_stage}')")
             if dcm_result.get("status") == "EXPORTED":
                 st.success(f"DCM project written to: {dcm_result.get('stage')}")
                 st.markdown(f"**Tables exported:** {dcm_result.get('table_count', 0)}")
@@ -1830,7 +1890,7 @@ def _render_obs_cost_attribution(eid: str, run_row):
     with col_btn:
         if st.button("🔄 Capture / Refresh Costs", key=f"capture_cost_{eid}"):
             try:
-                run_call(f"CALL AGENT_FRAMEWORK.CAPTURE_WORKFLOW_COST('{eid}')")
+                run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.CAPTURE_WORKFLOW_COST('{eid}')")
                 st.success("Cost data captured.")
                 st.cache_data.clear()
                 st.rerun()
@@ -2103,30 +2163,21 @@ def render_registry_tab():
     reg_tab1, reg_tab2 = st.tabs(["📊 Pipeline Flow", "🔗 Discovered Relationships"])
 
     with reg_tab1:
-        lineage_df = run_query(f"""
+        lineage_df = run_query("""
             SELECT
                 lm.bronze_table                                     AS FOUNDATION_TABLE,
                 lm.bronze_database                                  AS BRONZE_DB,
-                COALESCE(r.row_count, 0)                            AS FOUNDATION_ROWS,
+                COALESCE(lm.row_count_bronze, 0)                    AS FOUNDATION_ROWS,
                 COALESCE(lm.silver_table, '—')                      AS ENRICHED_TABLE,
-                COALESCE(lm.silver_schema, 'AGENT_FRAMEWORK_OUTPUT') AS ENRICHED_SCHEMA,
-                COALESCE(s.row_count, 0)                            AS ENRICHED_ROWS,
+                COALESCE(lm.silver_schema, '')                      AS ENRICHED_SCHEMA,
+                COALESCE(lm.row_count_silver, 0)                    AS ENRICHED_ROWS,
                 COALESCE(lm.gold_table, '—')                        AS ANALYTICS_TABLE,
-                COALESCE(lm.gold_schema, 'GOLD')                    AS ANALYTICS_SCHEMA,
-                COALESCE(g.row_count, 0)                            AS ANALYTICS_ROWS,
+                COALESCE(lm.gold_schema, '')                        AS ANALYTICS_SCHEMA,
+                COALESCE(lm.row_count_gold, 0)                      AS ANALYTICS_ROWS,
                 lm.silver_status                                    AS ENRICHED_STATUS,
                 lm.gold_status                                      AS ANALYTICS_STATUS,
                 COALESCE(pd.transformation_strategy, 'unknown')     AS STRATEGY
             FROM AGENT_FRAMEWORK.TABLE_LINEAGE_MAP lm
-            LEFT JOIN {ctx['db']}.INFORMATION_SCHEMA.TABLES r
-                ON r.table_schema = UPPER(lm.bronze_schema)
-                AND UPPER(r.table_name) = UPPER(lm.bronze_table)
-            LEFT JOIN INFORMATION_SCHEMA.TABLES s
-                ON UPPER(s.table_schema) = UPPER(COALESCE(lm.silver_schema, 'AGENT_FRAMEWORK_OUTPUT'))
-                AND UPPER(s.table_name)  = UPPER(COALESCE(lm.silver_table, ''))
-            LEFT JOIN INFORMATION_SCHEMA.TABLES g
-                ON UPPER(g.table_schema) = UPPER(COALESCE(lm.gold_schema, 'GOLD'))
-                AND UPPER(g.table_name)  = UPPER(COALESCE(lm.gold_table, ''))
             LEFT JOIN (
                 SELECT DISTINCT
                     UPPER(SPLIT_PART(source_table, '.', 3)) AS tbl,
@@ -2307,11 +2358,14 @@ def render_banner_tab():
 
         st.divider()
         st.markdown("#### Seed Grocery Example Config (LCL V2 — 14 banners → 13 Gold tables)")
+        _ctx_df = run_query("SELECT output_schema FROM AGENT_FRAMEWORK.PIPELINE_CONTEXT WHERE context_id = 1")
+        _default_silver = _ctx_df.iloc[0]["OUTPUT_SCHEMA"] if not _ctx_df.empty else "SILVER"
+        _default_gold = _default_silver.rsplit(".", 1)[0] + ".GOLD" if "." in _default_silver else "GOLD"
         c_schema, c_gold_schema, c_seed = st.columns([2, 2, 1])
-        silver_schema = c_schema.text_input("Silver Schema", value="SILVER", key="lcl_silver")
-        gold_schema   = c_gold_schema.text_input("Gold Schema", value="GOLD", key="lcl_gold")
+        silver_schema = c_schema.text_input("Silver Schema", value=_default_silver, key="lcl_silver")
+        gold_schema   = c_gold_schema.text_input("Gold Schema", value=_default_gold, key="lcl_gold")
         if c_seed.button("🌱 Seed Example", use_container_width=True):
-            result = run_call(f"CALL AGENT_FRAMEWORK.SEED_LCL_BANNER_CONFIG('{silver_schema}', '{gold_schema}')")
+            result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.SEED_LCL_BANNER_CONFIG('{silver_schema}', '{gold_schema}')")
             st.success(result if isinstance(result, str) else "LCL banner config seeded.")
             st.cache_data.clear()
             st.rerun()
@@ -2331,7 +2385,7 @@ def render_banner_tab():
             if st.button("▶ Validate Banners", type="primary", use_container_width=True):
                 db_arg = f"'{db_override}'" if db_override.strip() else "NULL"
                 with st.spinner(f"Validating {selected_partner} banners..."):
-                    result = run_call(f"CALL AGENT_FRAMEWORK.VALIDATE_MULTI_BANNER('{selected_partner}', {db_arg})")
+                    result = run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.VALIDATE_MULTI_BANNER('{selected_partner}', {db_arg})")
 
                 if result:
                     import json
@@ -2464,6 +2518,7 @@ def render_documents_tab():
     )
 
     doc_type_options = {
+        "Business Rules":      "business_rules",
         "Naming Convention":   "naming_convention",
         "Data Dictionary":     "data_dictionary",
         "ERD / Schema Map":    "erd",
@@ -2579,7 +2634,7 @@ def render_documents_tab():
                 st.caption(f"Indexed at {str(row.get('created_at', ''))[:16]}")
                 if st.button(f"🗑️ Remove {row['doc_name']}", key=f"rm_{row['doc_name']}"):
                     safe_dn = row["doc_name"].replace("'", "''")
-                    run_call(f"CALL AGENT_FRAMEWORK.REMOVE_DOCUMENT('{safe_dn}')")
+                    run_call(f"CALL {_FW_DB}.AGENT_FRAMEWORK.REMOVE_DOCUMENT('{safe_dn}')")
                     st.cache_data.clear()
                     st.rerun()
 
@@ -2828,9 +2883,14 @@ def render_orchestrate_tab():
     if st.button("🚀 Run Orchestrator Agent", type="primary", key="run_orch_v4"):
         note = trigger_note or "Streamlit v4 orchestrate"
         with st.spinner("Orchestrator running…"):
+            if selected_labels:
+                chosen = [lineage_df.loc[lineage_df["LABEL"] == lbl, "TBL"].iloc[0] for lbl in selected_labels]
+                tables_sql = "ARRAY_CONSTRUCT(" + ", ".join(f"'{t}'" for t in chosen) + ")"
+            else:
+                tables_sql = "NULL"
             result = run_call(
-                f"CALL AGENT_FRAMEWORK.RUN_AGENTIC_WORKFLOW("
-                f"trigger_source => '{note}', tables_list => NULL, p_trigger_type => 'MANUAL')"
+                f"CALL {_FW_DB}.AGENT_FRAMEWORK.RUN_AGENTIC_WORKFLOW("
+                f"trigger_source => '{note}', tables_list => {tables_sql}, p_trigger_type => 'MANUAL')"
             )
         if result.get("status") == "ERROR":
             st.error(result.get("error", str(result)))

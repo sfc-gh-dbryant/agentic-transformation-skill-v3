@@ -130,8 +130,11 @@ def check_excluded_rows(session, silver_fqn, banner_col, banner_val, excl_cats):
 
 
 def check_gold_rows(session, gold_fqn):
-    """Count rows in the Gold table."""
-    return count_rows(session, f"SELECT COUNT(*) FROM {gold_fqn}")
+    """Count rows in the Gold table. Returns 0 if table doesn't exist yet."""
+    try:
+        return count_rows(session, f"SELECT COUNT(*) FROM {gold_fqn}")
+    except Exception:
+        return 0
 
 
 def compute_variance(expected, actual):
@@ -298,20 +301,20 @@ BEGIN
         (partner_name, bronze_table, silver_table, banner_column, banner_value,
          gold_table, merge_into_banner, excluded_categories, upc_threshold_pct, notes)
     VALUES
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'superstore',            :gold_schema || '.LCL_GOLD_SUPERSTORE',    NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'nofrills',              :gold_schema || '.LCL_GOLD_NOFRILLS',       NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'maxi',                  :gold_schema || '.LCL_GOLD_MAXI',           NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'independent',           :gold_schema || '.LCL_GOLD_INDEPENDENT',    NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'rass',                  :gold_schema || '.LCL_GOLD_RASS',           NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'zehrs',                 :gold_schema || '.LCL_GOLD_ZEHRS',          NULL,          'Ancillary,Liquor', 30.0, 'Zehrs Silver is pre-dedup staging containing all banners — use LCL_PRODUCTS_SILVER'),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'loblaws',               :gold_schema || '.LCL_GOLD_LOBLAWS',        NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'wholesaleclub',         :gold_schema || '.LCL_GOLD_WHOLESALECLUB',  NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'fortinos',              :gold_schema || '.LCL_GOLD_FORTINOS',       NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'dominion',              :gold_schema || '.LCL_GOLD_DOMINION',       NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'provigo',               :gold_schema || '.LCL_GOLD_PROVIGO',        NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'valumart',              :gold_schema || '.LCL_GOLD_VALUMART',       NULL,          'Ancillary,Liquor', 30.0, NULL),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'independentcitymarket', :gold_schema || '.LCL_GOLD_INDEPENDENT',    'independent', 'Ancillary,Liquor', 30.0, 'ICM merges into independent Gold table'),
-        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS_SILVER',     'BANNER', 'your ind grocer',       NULL,                                       NULL,          NULL,               30.0, 'No Gold table for this banner');
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'superstore',            :gold_schema || '.LCL_GOLD_SUPERSTORE',    NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'nofrills',              :gold_schema || '.LCL_GOLD_NOFRILLS',       NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'maxi',                  :gold_schema || '.LCL_GOLD_MAXI',           NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'independent',           :gold_schema || '.LCL_GOLD_INDEPENDENT',    NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'rass',                  :gold_schema || '.LCL_GOLD_RASS',           NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'zehrs',                 :gold_schema || '.LCL_GOLD_ZEHRS',          NULL,          'Ancillary,Liquor', 30.0, 'Zehrs Silver is pre-dedup staging containing all banners — use LCL_PRODUCTS'),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'loblaws',               :gold_schema || '.LCL_GOLD_LOBLAWS',        NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'wholesaleclub',         :gold_schema || '.LCL_GOLD_WHOLESALECLUB',  NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'fortinos',              :gold_schema || '.LCL_GOLD_FORTINOS',       NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'dominion',              :gold_schema || '.LCL_GOLD_DOMINION',       NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'provigo',               :gold_schema || '.LCL_GOLD_PROVIGO',        NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'valumart',              :gold_schema || '.LCL_GOLD_VALUMART',       NULL,          'Ancillary,Liquor', 30.0, NULL),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'independentcitymarket', :gold_schema || '.LCL_GOLD_INDEPENDENT',    'independent', 'Ancillary,Liquor', 30.0, 'ICM merges into independent Gold table'),
+        ('LCL', 'BRONZE.LCL_PRODUCTS',      :banner_schema || '.LCL_PRODUCTS',     'BANNER', 'your ind grocer',       NULL,                                       NULL,          NULL,               30.0, 'No Gold table for this banner');
 
     RETURN 'Seeded 14 banner config rows for LCL. Update table/schema names as needed.';
 END;
