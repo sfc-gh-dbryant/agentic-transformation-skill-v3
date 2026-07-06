@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Transformation Skill | Snowflake Professional Services</title>
+<style>
+  :root {
+    --sf-blue: #29B5E8;
+    --sf-dark: #11213B;
+    --sf-navy: #0d1b2e;
+    --sf-white: #FFFFFF;
+    --sf-gray: #8AA0B8;
+    --sf-green: #2ECC71;
+    --sf-orange: #F39C12;
+    --sf-mid: #1a3050;
+    --sf-light: #E8F4FD;
+    --body-bg: #F4F6F9;
+    --text: #1A2A3A;
+    --text-light: #4A5A6A;
+    --border: #D0DCE8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--body-bg); color: var(--text); line-height: 1.6; }
+
+  .page-header { background: var(--sf-dark); }
+  .header-inner { max-width: 960px; margin: 0 auto; padding: 18px 32px; display: flex; align-items: center; justify-content: space-between; }
+  .header-inner img { height: 28px; }
+  .header-tag { font-size: 11px; color: var(--sf-blue); letter-spacing: 2px; text-transform: uppercase; font-weight: 600; }
+  .header-stripe { height: 3px; background: linear-gradient(90deg, var(--sf-blue), #00D4FF); }
+
+  .hero { background: var(--sf-dark); color: white; padding: 40px 32px 36px; }
+  .hero-inner { max-width: 960px; margin: 0 auto; display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; }
+  .hero h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+  .hero h1 span { color: var(--sf-blue); }
+  .hero p { font-size: 14px; color: var(--sf-gray); max-width: 580px; line-height: 1.6; }
+  .hero-metrics { display: flex; flex-direction: column; gap: 10px; }
+  .hero-metric { background: rgba(41,181,232,0.1); border: 1px solid rgba(41,181,232,0.3); border-radius: 6px; padding: 10px 16px; text-align: center; min-width: 120px; }
+  .hero-metric .val { font-size: 22px; font-weight: 800; color: var(--sf-blue); }
+  .hero-metric .lbl { font-size: 10px; color: var(--sf-gray); text-transform: uppercase; letter-spacing: 1px; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 32px; }
+  .section { margin-bottom: 32px; }
+  .section-title { font-size: 15px; font-weight: 700; color: var(--sf-dark); border-left: 3px solid var(--sf-blue); padding-left: 12px; margin-bottom: 16px; }
+
+  .highlight { background: var(--sf-light); border-left: 3px solid var(--sf-blue); border-radius: 0 6px 6px 0; padding: 14px 18px; margin-bottom: 16px; }
+  .highlight p { font-size: 13.5px; color: var(--text); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 16px; }
+  th { background: var(--sf-mid); color: white; padding: 9px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); color: var(--text-light); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(41,181,232,0.03); }
+  td:first-child { color: var(--text); font-weight: 600; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  .card { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .card.accent { border-top: 3px solid var(--sf-blue); }
+  .card.green { border-top: 3px solid var(--sf-green); }
+  .card h4 { font-size: 13px; font-weight: 700; color: var(--sf-dark); margin-bottom: 6px; }
+  .card .icon { font-size: 20px; margin-bottom: 8px; }
+  .card p { font-size: 12.5px; color: var(--text-light); line-height: 1.5; }
+
+  .flow { display: flex; align-items: stretch; gap: 0; margin-bottom: 20px; }
+  .flow-step { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 14px 12px; flex: 1; text-align: center; }
+  .flow-step .num { font-size: 10px; color: var(--sf-blue); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .flow-step .name { font-size: 12px; font-weight: 700; color: var(--sf-dark); margin-bottom: 4px; }
+  .flow-step .desc { font-size: 11px; color: var(--text-light); line-height: 1.4; }
+  .flow-arrow { display: flex; align-items: center; padding: 0 4px; color: var(--sf-blue); font-size: 16px; flex-shrink: 0; }
+
+  ul.check { list-style: none; padding: 0; }
+  ul.check li { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: 13px; color: var(--text-light); border-bottom: 1px solid var(--border); }
+  ul.check li:last-child { border-bottom: none; }
+  ul.check li::before { content: '✓'; color: var(--sf-green); font-weight: 700; flex-shrink: 0; }
+  ul.check li strong { color: var(--text); }
+
+  blockquote { background: white; border-left: 3px solid var(--sf-blue); border-radius: 0 8px 8px 0; padding: 16px 20px; font-size: 14px; color: var(--text); font-style: italic; margin: 0 0 16px; line-height: 1.65; }
+  blockquote strong { color: var(--sf-dark); font-style: normal; }
+
+  p.body { font-size: 13.5px; color: var(--text-light); margin-bottom: 12px; line-height: 1.65; }
+  p.body strong { color: var(--text); }
+
+  code { background: #EEF2F7; padding: 2px 6px; border-radius: 3px; font-size: 12px; font-family: 'Courier New', monospace; color: var(--sf-dark); }
+
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill-blue { background: rgba(41,181,232,0.1); color: var(--sf-blue); border: 1px solid var(--sf-blue); }
+  .pill-green { background: #F0FBF4; color: var(--sf-green); border: 1px solid var(--sf-green); }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+
+  .snowflake-badge { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; display: flex; align-items: center; gap: 16px; margin-bottom: 0; }
+  .snowflake-badge img { height: 24px; opacity: 0.8; }
+  .snowflake-badge p { font-size: 12.5px; color: var(--text-light); }
+  .snowflake-badge p strong { color: var(--text); }
+
+  footer { background: var(--sf-dark); color: var(--sf-gray); text-align: center; padding: 16px; font-size: 11px; margin-top: 32px; }
+  footer span { color: var(--sf-blue); }
+
+  @media (max-width: 700px) {
+    .two-col, .three-col { grid-template-columns: 1fr; }
+    .hero-inner { grid-template-columns: 1fr; }
+    .hero-metrics { flex-direction: row; flex-wrap: wrap; }
+    .flow { flex-direction: column; }
+    .flow-arrow { display: none; }
+    .container { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div class="header-inner">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="header-tag">Professional Services</span>
+  </div>
+  <div class="header-stripe"></div>
+</div>
+
+<div class="hero">
+  <div class="hero-inner">
+    <div>
+      <h1>Agentic Transformation <span>Skill</span></h1>
+      <p>AI-accelerated Bronze → Silver → Gold pipeline development, delivered entirely within your Snowflake account. Weeks of manual data engineering work — completed in days.</p>
+    </div>
+    <div class="hero-metrics">
+      <div class="hero-metric"><div class="val">4–8 wks</div><div class="lbl">Traditional</div></div>
+      <div class="hero-metric"><div class="val">Days</div><div class="lbl">With ATS</div></div>
+      <div class="hero-metric"><div class="val">0</div><div class="lbl">External deps</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- HOW IT WORKS -->
+  <div class="section">
+    <div class="section-title">Five-Phase Agentic Pipeline</div>
+    <div class="flow">
+      <div class="flow-step"><div class="num">Phase 1</div><div class="name">🔍 Schema Analyst</div><div class="desc">Discovers FK relationships and data patterns across Bronze tables</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="num">Phase 2</div><div class="name">📋 Planner</div><div class="desc">Decides transformation strategy per table with confidence scores</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="num">Phase 3</div><div class="name">⚙️ Executor</div><div class="desc">Generates and runs Silver DDL — dry-run mode for safe review first</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="num">Phase 4</div><div class="name">✅ Validator</div><div class="desc">Checks row counts, PK uniqueness, and data quality thresholds</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="num">Phase 5</div><div class="name">🧠 Reflector</div><div class="desc">Captures learnings — every future run benefits automatically</div></div>
+    </div>
+    <p class="body">Each agent uses your business context — <strong>schema contracts</strong>, <strong>transformation directives</strong>, and <strong>uploaded domain documents</strong> — to make decisions that align with your data standards. The knowledge corpus grows with every run.</p>
+  </div>
+
+  <hr>
+
+  <!-- WHAT YOU RECEIVE -->
+  <div class="section">
+    <div class="section-title">What the Engagement Delivers</div>
+    <div class="three-col">
+      <div class="card accent">
+        <div class="icon">🏗️</div>
+        <h4>Silver Tables</h4>
+        <p>Transformed, validated, analytics-ready data. Every table checked for row counts, PK uniqueness, and quality thresholds before the engagement closes.</p>
+      </div>
+      <div class="card accent">
+        <div class="icon">📐</div>
+        <h4>Schema Contracts + Directives</h4>
+        <p>Structural rules and per-table business logic encoded as reusable instructions — the institutional knowledge of your pipeline, documented and searchable.</p>
+      </div>
+      <div class="card accent">
+        <div class="icon">📦</div>
+        <h4>DCM Export Package</h4>
+        <p>Production-ready deployment artifacts: manifest.yml, DEFINE TABLE DDL, role grants, and data quality expectations — ready for your deployment workflow.</p>
+      </div>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- WHAT IT IS NOT -->
+  <div class="section">
+    <div class="section-title">Important Boundaries</div>
+    <table>
+      <thead><tr><th>What ATS Is Not</th><th>Why It Matters</th></tr></thead>
+      <tbody>
+        <tr><td>Not a product</td><td>ATS is delivered as part of a PS engagement. No support contracts, versioned releases, or SLAs beyond engagement terms.</td></tr>
+        <tr><td>Not a no-code tool</td><td>ATS accelerates data engineers — it does not replace them. Your team validates outputs and tunes directives.</td></tr>
+        <tr><td>Not an ingestion layer</td><td>Bronze tables must already exist. ATS focuses on Bronze → Silver transformation and AI-proposed Gold DDL.</td></tr>
+        <tr><td>Not the nightly pipeline</td><td>ATS authors your pipeline logic. That logic is then operationalized into scheduled Snowflake pipelines (Tasks, Dynamic Tables, or dbt models) that run independently.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr>
+
+  <!-- SAFETY -->
+  <div class="section">
+    <div class="section-title">Existing Data Is Protected</div>
+    <div class="three-col" style="margin-bottom:16px;">
+      <div class="card green">
+        <div class="icon">🔍</div>
+        <h4>Dry Run — Default ON</h4>
+        <p>Every pipeline run generates and logs DDL but executes nothing. You review every statement before a single table is touched.</p>
+      </div>
+      <div class="card green">
+        <div class="icon">🛡️</div>
+        <h4>Overwrite Protection — Default OFF</h4>
+        <p>If a target table already has rows, the Executor skips it, logs it, and continues. Existing data is never overwritten unless you explicitly permit it.</p>
+      </div>
+      <div class="card green">
+        <div class="icon">🌾</div>
+        <h4>Brownfield Mode</h4>
+        <p>For environments with existing Silver tables, Brownfield Mode skips them entirely and processes only the gaps. Existing tables logged as EXISTING, never touched.</p>
+      </div>
+    </div>
+    <div class="highlight">
+      <p>A first run against <em>any</em> environment — greenfield or brownfield — produces <strong>zero side effects</strong> until your team has reviewed and approved the proposed DDL.</p>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- SCENARIO -->
+  <div class="section">
+    <div class="section-title">Real-World Scenario: Multi-Business-Unit Migration</div>
+    <p class="body">A specialty insurance company is migrating 12–20 business units from on-premises SQL Server and SSIS to Snowflake. Each BU brings raw Bronze tables — claims, premiums, policy data — with legacy schemas, inconsistent nulls, undocumented primary keys, and transformation logic nobody fully understands.</p>
+    <div class="two-col" style="margin-bottom:16px;">
+      <div>
+        <p style="font-size:12px;font-weight:700;color:#E74C3C;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Traditional Approach</p>
+        <ul class="check" style="--check-color:#E74C3C;">
+          <li style="color:var(--text-light);">Manual schema reverse-engineering per BU</li>
+          <li style="color:var(--text-light);">Silver DDL written by hand — 6–8 weeks per BU</li>
+          <li style="color:var(--text-light);">Validation scripts from scratch per table</li>
+          <li style="color:var(--text-light);">No knowledge transfer — BU 12 starts from zero</li>
+        </ul>
+      </div>
+      <div>
+        <p style="font-size:12px;font-weight:700;color:var(--sf-green);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">With ATS</p>
+        <ul class="check">
+          <li>Configure pipeline context once per engagement</li>
+          <li>Agents plan and execute Silver in <strong>days</strong></li>
+          <li>Reflector learnings from BU 1 improve BU 2–15 automatically</li>
+          <li>DCM export packages each BU's pipeline for deployment</li>
+        </ul>
+      </div>
+    </div>
+    <blockquote>"ATS produces the Silver transformation logic for each business unit. Once validated, that logic is operationalized into scheduled Snowflake pipelines that run independently. ATS is not the nightly pipeline — it is the accelerator that authors it."</blockquote>
+  </div>
+
+  <hr>
+
+  <!-- BUILT ON SNOWFLAKE -->
+  <div class="section">
+    <div class="section-title">Built on Snowflake — No External Dependencies</div>
+    <div class="two-col">
+      <div>
+        <ul class="check">
+          <li><strong>Cortex LLMs</strong> — SQL generation and schema analysis</li>
+          <li><strong>Cortex Search</strong> — knowledge retrieval across prior learnings and documents</li>
+          <li><strong>SQL Scripting SPs</strong> — deterministic guardrails around every LLM call</li>
+          <li><strong>Streamlit in Snowflake</strong> — 11-tab pipeline management UI</li>
+        </ul>
+      </div>
+      <div>
+        <ul class="check">
+          <li>No external services or APIs</li>
+          <li>No data leaves your Snowflake account</li>
+          <li>GA on all Snowflake regions including Azure</li>
+          <li>Deploys in a single schema — no infrastructure to manage</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <span>Snowflake Professional Services</span> &nbsp;·&nbsp; July 2026
+</footer>
+
+</body>
+</html>
