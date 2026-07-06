@@ -346,6 +346,7 @@ _NAV_GROUPS = [
     ("Ops & Export", [
         (13, "🏷️",  "Partner Routing"),
         (14, "📦",  "DCM Export"),
+        (15, "🔧",  "dbt Export"),
     ]),
 ]
 
@@ -2520,6 +2521,297 @@ snow stage get @AGENT_FRAMEWORK.DCM_OUTPUT ./dcm_project -c <connection>
 {deploy_cmd}""", language="bash")
 
 
+def render_dbt_export_tab():
+    import io, zipfile, textwrap
+
+    st.subheader("🔧 dbt Project Export")
+    st.caption("Generate a dbt project from your ATS pipeline output — models, sources, schema tests, and project config.")
+
+    ctx = _db_context()
+
+    c1, c2, c3 = st.columns(3)
+    project_name  = c1.text_input("dbt Project Name",  value="ats_pipeline",    key="dbt_project_name")
+    profile_name  = c2.text_input("dbt Profile Name",   value="snowflake",       key="dbt_profile_name")
+    source_name   = c3.text_input("Source Name",        value="bronze",          key="dbt_source_name")
+
+    lineage_df = run_query(f"""
+        SELECT bronze_table, bronze_schema, bronze_database,
+               silver_table, silver_schema, silver_status,
+               gold_table,   gold_schema,   gold_status
+        FROM {ctx['db']}.AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
+        WHERE silver_status = 'COMPLETE'
+        ORDER BY bronze_table
+    """)
+    planner_df = run_query(f"""
+        SELECT UPPER(SPLIT_PART(source_table, '.', -1)) AS tbl,
+               transformation_strategy, pk_columns
+        FROM {ctx['db']}.AGENT_FRAMEWORK.PLANNER_DECISIONS
+    """)
+    contracts_df = run_query(f"""
+        SELECT contract_scope, rule_category, rule_name, rule_value
+        FROM {ctx['db']}.AGENT_FRAMEWORK.SCHEMA_CONTRACTS
+        WHERE is_active = TRUE
+    """)
+
+    n_silver = len(lineage_df)
+    n_gold   = len(lineage_df[lineage_df["GOLD_STATUS"] == "COMPLETE"]) if not lineage_df.empty else 0
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Silver Models",  n_silver)
+    m2.metric("Gold Models",    n_gold)
+    m3.metric("Schema Tests",   len(planner_df[planner_df["PK_COLUMNS"].notna()]) * 2 if not planner_df.empty else 0)
+
+    if n_silver == 0:
+        st.warning("No completed Silver tables found. Run the pipeline first.")
+        return
+
+    if st.button("⚡ Generate dbt Project", type="primary", use_container_width=True):
+        files = {}
+
+        # ── dbt_project.yml ──────────────────────────────────────────────────
+        files["dbt_project.yml"] = textwrap.dedent(f"""\
+            name: '{project_name}'
+            version: '1.0.0'
+            config-version: 2
+            profile: '{profile_name}'
+            model-paths: ["models"]
+            test-paths:  ["tests"]
+            analysis-paths: ["analyses"]
+            macro-paths:    ["macros"]
+            target-path:    "target"
+            clean-targets:  ["target", "dbt_packages"]
+
+            models:
+              {project_name}:
+                silver:
+                  +materialized: table
+                  +tags: ["silver", "ats_generated"]
+                gold:
+                  +materialized: table
+                  +tags: ["gold", "ats_generated"]
+        """)
+
+        # ── profiles.yml (template only) ─────────────────────────────────────
+        files["profiles.yml.template"] = textwrap.dedent(f"""\
+            # Rename to profiles.yml and place in ~/.dbt/ or project root
+            {profile_name}:
+              target: dev
+              outputs:
+                dev:
+                  type: snowflake
+                  account: <your_account>
+                  user: <your_user>
+                  authenticator: externalbrowser   # or password / private_key
+                  role: <your_role>
+                  warehouse: <your_warehouse>
+                  database: <your_database>
+                  schema: <your_silver_schema>
+                  threads: 4
+        """)
+
+        # ── sources.yml ───────────────────────────────────────────────────────
+        src_groups = {}
+        for _, row in lineage_df.iterrows():
+            key = (row["BRONZE_DATABASE"], row["BRONZE_SCHEMA"])
+            src_groups.setdefault(key, []).append(row["BRONZE_TABLE"])
+
+        src_lines = ["version: 2\n", "sources:"]
+        for (db, schema), tables in src_groups.items():
+            src_lines.append(f"  - name: {source_name}")
+            src_lines.append(f"    database: {db}")
+            src_lines.append(f"    schema: {schema}")
+            src_lines.append(f"    tables:")
+            for t in tables:
+                src_lines.append(f"      - name: {t}")
+        files["models/sources.yml"] = "\n".join(src_lines) + "\n"
+
+        # ── Silver models + schema.yml ────────────────────────────────────────
+        silver_schema_blocks = ["version: 2\n", "models:"]
+        for _, row in lineage_df.iterrows():
+            bronze_tbl  = row["BRONZE_TABLE"]
+            silver_tbl  = row["SILVER_TABLE"]
+            silver_sch  = row["SILVER_SCHEMA"]
+
+            plan = planner_df[planner_df["TBL"] == bronze_tbl.upper()]
+            strategy = plan.iloc[0]["TRANSFORMATION_STRATEGY"] if not plan.empty else "passthrough"
+            pk_raw   = plan.iloc[0]["PK_COLUMNS"]         if not plan.empty else None
+            pk_cols  = [c.strip() for c in pk_raw.split(",")] if pk_raw else []
+
+            tiebreak_row = contracts_df[
+                (contracts_df["RULE_CATEGORY"] == "deduplication") &
+                (contracts_df["RULE_NAME"]     == "tiebreak_column")
+            ]
+            tiebreak = tiebreak_row.iloc[0]["RULE_VALUE"] if not tiebreak_row.empty else "UPDATED_AT"
+
+            del_flag_row = contracts_df[
+                (contracts_df["RULE_CATEGORY"] == "cdc_columns") &
+                (contracts_df["RULE_NAME"]     == "delete_flag")
+            ]
+            del_flag = del_flag_row.iloc[0]["RULE_VALUE"] if not del_flag_row.empty else None
+
+            src_ref = "{{{{ source('{src}', '{tbl}') }}}}".format(src=source_name, tbl=bronze_tbl)
+
+            if strategy == "deduplicate" and pk_cols:
+                partition_by = ", ".join(pk_cols)
+                sql = textwrap.dedent(f"""\
+                    with source as (
+                        select * from {src_ref}
+                    ),
+                    deduped as (
+                        select *,
+                            row_number() over (
+                                partition by {partition_by}
+                                order by {tiebreak} desc nulls last
+                            ) as _row_num
+                        from source
+                        {"where " + del_flag + " is distinct from true" if del_flag else ""}
+                    )
+                    select * exclude (_row_num)
+                    from deduped
+                    where _row_num = 1
+                """)
+            elif strategy == "deduplicate":
+                sql = textwrap.dedent(f"""\
+                    with source as (
+                        select * from {src_ref}
+                    )
+                    select distinct *
+                    from source
+                    {"where " + del_flag + " is distinct from true" if del_flag else ""}
+                """)
+            else:
+                sql = textwrap.dedent(f"""\
+                    with source as (
+                        select * from {src_ref}
+                    )
+                    select * from source
+                """)
+
+            files[f"models/silver/{silver_tbl}.sql"] = sql
+
+            silver_schema_blocks.append(f"  - name: {silver_tbl}")
+            silver_schema_blocks.append(f"    description: >")
+            silver_schema_blocks.append(f"      Silver model for {bronze_tbl}. Strategy: {strategy}.")
+            if pk_cols:
+                silver_schema_blocks.append(f"    columns:")
+                for col in pk_cols:
+                    silver_schema_blocks.append(f"      - name: {col}")
+                    silver_schema_blocks.append(f"        tests:")
+                    silver_schema_blocks.append(f"          - not_null")
+                    silver_schema_blocks.append(f"          - unique")
+
+        files["models/silver/schema.yml"] = "\n".join(silver_schema_blocks) + "\n"
+
+        # ── Gold models ───────────────────────────────────────────────────────
+        gold_rows = lineage_df[lineage_df["GOLD_STATUS"] == "COMPLETE"]
+        if not gold_rows.empty:
+            gold_schema_blocks = ["version: 2\n", "models:"]
+            for _, row in gold_rows.iterrows():
+                silver_tbl = row["SILVER_TABLE"]
+                gold_tbl   = row["GOLD_TABLE"]
+                silver_ref = "{{{{ ref('{tbl}') }}}}".format(tbl=silver_tbl)
+                sql = textwrap.dedent(f"""\
+                    with silver as (
+                        select * from {silver_ref}
+                    )
+                    -- TODO: add aggregations, metrics, or joins for analytics layer
+                    select * from silver
+                """)
+                files[f"models/gold/{gold_tbl}.sql"] = sql
+                gold_schema_blocks.append(f"  - name: {gold_tbl}")
+                gold_schema_blocks.append(f"    description: Gold/Analytics model sourced from {silver_tbl}.")
+            files["models/gold/schema.yml"] = "\n".join(gold_schema_blocks) + "\n"
+
+        # ── README ────────────────────────────────────────────────────────────
+        files["README.md"] = textwrap.dedent(f"""\
+            # {project_name}
+
+            Generated by **Agentic Transformation Skill v4** — Snowflake Professional Services.
+
+            ## Structure
+
+            ```
+            models/
+              sources.yml          # Bronze source definitions
+              silver/              # Deduplicated Silver layer models
+                schema.yml         # Column tests from ATS schema contracts
+              gold/                # Analytics layer models
+                schema.yml
+            dbt_project.yml
+            profiles.yml.template  # Rename and configure for your environment
+            ```
+
+            ## Usage
+
+            ```bash
+            cp profiles.yml.template ~/.dbt/profiles.yml
+            # Edit profiles.yml with your Snowflake credentials
+
+            dbt deps
+            dbt run --select silver.*
+            dbt test --select silver.*
+            dbt run --select gold.*
+            ```
+
+            ## Notes
+
+            - Silver models implement the transformation strategy determined by the ATS Planner agent.
+            - Gold models are stubs — review and add aggregations before running in production.
+            - Schema tests are generated from ATS schema contracts and planner PK decisions.
+        """)
+
+        # ── Build ZIP ─────────────────────────────────────────────────────────
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path, content in files.items():
+                zf.writestr(f"{project_name}/{path}", content)
+        buf.seek(0)
+
+        st.session_state["dbt_files"]   = files
+        st.session_state["dbt_zip"]     = buf.getvalue()
+        st.session_state["dbt_project"] = project_name
+        st.rerun()
+
+    if "dbt_files" in st.session_state:
+        files        = st.session_state["dbt_files"]
+        zip_bytes    = st.session_state["dbt_zip"]
+        project_name = st.session_state.get("dbt_project", "ats_pipeline")
+
+        st.divider()
+        st.download_button(
+            label="⬇ Download dbt Project (.zip)",
+            data=zip_bytes,
+            file_name=f"{project_name}.zip",
+            mime="application/zip",
+            use_container_width=True,
+            type="primary",
+        )
+
+        st.markdown("#### Generated Files")
+        file_names = sorted(files.keys())
+        sel = st.selectbox("Preview file", options=file_names, key="dbt_preview_sel")
+        lang = "yaml" if sel.endswith(".yml") or sel.endswith(".yaml") or sel.endswith(".template") else ("markdown" if sel.endswith(".md") else "sql")
+        st.code(files[sel], language=lang)
+
+        st.divider()
+        st.markdown("#### Next Steps")
+        st.code(textwrap.dedent(f"""\
+            # 1. Unzip the project
+            unzip {project_name}.zip && cd {project_name}
+
+            # 2. Configure your Snowflake profile
+            cp profiles.yml.template ~/.dbt/profiles.yml
+            # Edit with your account, role, warehouse, database
+
+            # 3. Run Silver models
+            dbt run --select silver.*
+            dbt test --select silver.*
+
+            # 4. Review Gold stubs, add analytics logic, then run
+            dbt run --select gold.*
+        """), language="bash")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3073,6 +3365,7 @@ _HOME_SECTIONS = [
         "features": [
             ("🏷️ Partner Routing", "Configure output schema routing by business unit, region, or partner tag."),
             ("📦 DCM Export",       "Generate a production-ready DCM manifest with DDL, grants, and DQ expectations."),
+            ("🔧 dbt Export",       "Export Silver and Gold models as a complete dbt project — models, sources, schema tests, and project config."),
         ],
     },
 ]
@@ -3188,6 +3481,7 @@ def main():
         "📊 Observe",
         "🏷️ Partner Routing",
         "📦 DCM Export",
+        "🔧 dbt Export",
     ]
     TAB_RENDER = [
         render_setup_tab,
@@ -3205,6 +3499,7 @@ def main():
         render_observability_tab,
         render_banner_tab,
         render_dcm_tab,
+        render_dbt_export_tab,
     ]
 
     if "active_tab" not in st.session_state:
