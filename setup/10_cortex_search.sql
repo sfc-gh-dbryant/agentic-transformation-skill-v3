@@ -69,14 +69,15 @@ CREATE OR REPLACE VIEW AGENT_FRAMEWORK.ATS_KNOWLEDGE_CORPUS AS
 -- Auto-refreshes every hour as new runs add learnings and decisions
 -- ---------------------------------------------------------------------------
 
-CREATE OR REPLACE CORTEX SEARCH SERVICE AGENT_FRAMEWORK.ATS_KNOWLEDGE_SEARCH
-  ON text_content
-  ATTRIBUTES source_type, source_context, confidence_bucket
-  WAREHOUSE = IDENTIFIER($WAREHOUSE)
-  TARGET_LAG = '1 hour'
-AS
-  SELECT source_type, source_context, confidence_bucket, text_content
-  FROM AGENT_FRAMEWORK.ATS_KNOWLEDGE_CORPUS;
+EXECUTE IMMEDIATE
+    'CREATE OR REPLACE CORTEX SEARCH SERVICE AGENT_FRAMEWORK.ATS_KNOWLEDGE_SEARCH'
+    || ' ON text_content'
+    || ' ATTRIBUTES source_type, source_context, confidence_bucket'
+    || ' WAREHOUSE = ' || $WAREHOUSE
+    || ' TARGET_LAG = ''1 hour'''
+    || ' AS SELECT source_type, source_context, confidence_bucket, text_content'
+    || ' FROM AGENT_FRAMEWORK.ATS_KNOWLEDGE_CORPUS';
+
 
 -- ---------------------------------------------------------------------------
 -- SEARCH_ATS_KNOWLEDGE — called by Planner before each LLM batch
