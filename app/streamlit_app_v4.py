@@ -3391,7 +3391,8 @@ def render_home_tab():
     raw Bronze tables through the full analytics stack — validated
     <strong style="color:white;">Silver transformation</strong>, AI-proposed
     <strong style="color:white;">Gold analytics DDL</strong>, and production-ready
-    <strong style="color:white;">DCM deployment packages</strong> — powered by a coordinated team of
+    <strong style="color:white;">deployment exports</strong> for both Snowflake-native
+    (DCM) and dbt workflows — powered by a coordinated team of
     Cortex Agents running entirely inside your Snowflake account, with full observability at every step.
   </div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;">
