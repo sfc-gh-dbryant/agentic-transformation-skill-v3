@@ -3094,12 +3094,12 @@ def render_home_tab():
     </div>
   </div>
   <div style="color:#C8D8E8;font-size:0.925rem;max-width:740px;line-height:1.75;margin-bottom:20px;">
-    ATS v4 is a <strong style="color:white;">multi-agent data engineering framework</strong> that transforms
-    raw Bronze tables into validated, analytics-ready Silver data — powered by a coordinated team of
-    <strong style="color:white;">Cortex Agents</strong> running entirely inside your Snowflake account.
-    Where v3 used a sequential Snowflake Scripting pipeline, v4 routes each phase through
-    live Cortex Agents that can reason, self-correct, and collaborate — with full observability
-    at every step.
+    ATS v4 is a <strong style="color:white;">multi-agent data engineering framework</strong> that takes
+    raw Bronze tables through the full analytics stack — validated
+    <strong style="color:white;">Silver transformation</strong>, AI-proposed
+    <strong style="color:white;">Gold analytics DDL</strong>, and production-ready
+    <strong style="color:white;">DCM deployment packages</strong> — powered by a coordinated team of
+    Cortex Agents running entirely inside your Snowflake account, with full observability at every step.
   </div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;">
     <div style="background:rgba(41,181,232,0.12);border:1px solid rgba(41,181,232,0.3);
