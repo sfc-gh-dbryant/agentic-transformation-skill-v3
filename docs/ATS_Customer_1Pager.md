@@ -34,7 +34,7 @@ A Snowflake Professional Services engagement using ATS delivers:
 - **Silver tables** — transformed, validated, analytics-ready data in your Snowflake account
 - **Schema contracts** — structural rules that define how your Silver layer must look
 - **Transformation directives** — reusable business rules encoded as instructions for future pipeline runs
-- **The ATS framework** — deployed in your account so your team can run, extend, and adapt it
+- **The ATS framework** — deployed in your account for the duration of the engagement
 - **Pipeline documentation** — full lineage, audit logs, and workflow history for every run
 
 ---
@@ -45,7 +45,7 @@ A Snowflake Professional Services engagement using ATS delivers:
 |---|---|
 | **Not a product** | ATS is delivered as part of a Snowflake PS engagement. There are no support contracts, versioned releases, or SLAs beyond the engagement terms. |
 | **Not a no-code tool** | ATS accelerates data engineers — it does not replace them. Your team will validate outputs, tune directives, and adapt the framework to your environment. |
-| **Not production-hardened out of the box** | The framework is deployed and tested during the engagement. Your team owns testing, validation, and hardening for production workloads. |
+| **Not production-hardened out of the box** | The framework is deployed and tested during the engagement. Validation, hardening, and operationalization for production workloads are scoped as part of the engagement. |
 | **Not a full ETL replacement** | ATS focuses on Bronze → Silver transformation and AI-proposed Gold/Analytics DDL. It does not replace your ingestion layer or BI tooling (Power BI, Sigma, Tableau). |
 
 ---
@@ -64,7 +64,7 @@ These defaults mean a first run against any environment — greenfield or brownf
 
 ## Why It Matters
 
-> Traditional Bronze → Silver pipeline development averages **4–8 weeks** for a mid-sized dataset portfolio. ATS reduces this to **days**, while producing documented, repeatable, and extensible pipelines your team can own.
+> Traditional Bronze → Silver pipeline development averages **4–8 weeks** for a mid-sized dataset portfolio. ATS reduces this to **days**, while producing documented, repeatable, and extensible pipelines.
 
 The agents don't just run faster — they get smarter. Every run produces learnings that are stored in a searchable knowledge corpus, so the second pipeline run is better than the first, and the tenth is better than the fifth.
 

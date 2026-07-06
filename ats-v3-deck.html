@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Transformation Skill v3 — Snowflake PS</title>
+<style>
+  :root {
+    --sf-blue: #29B5E8;
+    --sf-dark: #11213B;
+    --sf-navy: #0d1b2e;
+    --sf-white: #FFFFFF;
+    --sf-gray: #8AA0B8;
+    --sf-accent: #00D4FF;
+    --sf-green: #2ECC71;
+    --sf-orange: #F39C12;
+    --sf-red: #E74C3C;
+    --sf-mid: #1a3050;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--sf-navy); color: var(--sf-white); overflow: hidden; }
+
+  .slide { display: none; width: 100vw; height: 100vh; flex-direction: column; position: relative; }
+  .slide.active { display: flex; }
+
+  /* Header */
+  .hdr { background: var(--sf-dark); padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--sf-blue); flex-shrink: 0; }
+  .hdr img { height: 30px; }
+  .hdr .section-tag { font-size: 11px; color: var(--sf-blue); letter-spacing: 2px; text-transform: uppercase; font-weight: 600; }
+
+  /* Nav */
+  .nav { background: var(--sf-dark); padding: 10px 28px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(41,181,232,0.2); flex-shrink: 0; }
+  .nav button { background: rgba(41,181,232,0.15); border: 1px solid var(--sf-blue); color: var(--sf-blue); padding: 6px 20px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+  .nav button:hover { background: var(--sf-blue); color: white; }
+  .nav .counter { color: var(--sf-gray); font-size: 12px; }
+  .progress { height: 3px; background: rgba(41,181,232,0.2); flex-shrink: 0; }
+  .progress-bar { height: 100%; background: var(--sf-blue); transition: width 0.3s; }
+
+  /* Content area */
+  .content { flex: 1; padding: 32px 48px; overflow: hidden; display: flex; flex-direction: column; }
+  .slide-title { font-size: 26px; font-weight: 700; color: var(--sf-white); margin-bottom: 8px; }
+  .slide-subtitle { font-size: 14px; color: var(--sf-blue); margin-bottom: 24px; }
+
+  /* Title slide */
+  .title-slide .content { justify-content: center; align-items: flex-start; background: radial-gradient(ellipse at 80% 50%, rgba(41,181,232,0.08) 0%, transparent 60%); }
+  .title-slide .big-title { font-size: 42px; font-weight: 800; line-height: 1.15; margin-bottom: 16px; }
+  .title-slide .big-title span { color: var(--sf-blue); }
+  .title-slide .tagline { font-size: 18px; color: var(--sf-gray); margin-bottom: 40px; max-width: 600px; line-height: 1.5; }
+  .title-slide .meta { display: flex; gap: 32px; }
+  .title-slide .meta-item { display: flex; flex-direction: column; gap: 4px; }
+  .title-slide .meta-item .label { font-size: 11px; color: var(--sf-blue); text-transform: uppercase; letter-spacing: 1px; }
+  .title-slide .meta-item .value { font-size: 14px; color: var(--sf-white); }
+  .title-decoration { position: absolute; right: 80px; top: 50%; transform: translateY(-50%); opacity: 0.06; font-size: 280px; font-weight: 900; color: var(--sf-blue); pointer-events: none; user-select: none; }
+
+  /* Cards */
+  .cards { display: grid; gap: 16px; flex: 1; }
+  .cards-2 { grid-template-columns: 1fr 1fr; }
+  .cards-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .cards-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .card { background: rgba(255,255,255,0.04); border: 1px solid rgba(41,181,232,0.2); border-radius: 8px; padding: 20px; }
+  .card.accent { border-color: var(--sf-blue); border-left: 3px solid var(--sf-blue); }
+  .card .card-icon { font-size: 24px; margin-bottom: 10px; }
+  .card .card-title { font-size: 14px; font-weight: 700; color: var(--sf-white); margin-bottom: 8px; }
+  .card .card-body { font-size: 12.5px; color: var(--sf-gray); line-height: 1.6; }
+
+  /* Highlight box */
+  .highlight { background: rgba(41,181,232,0.08); border-left: 3px solid var(--sf-blue); border-radius: 0 6px 6px 0; padding: 14px 18px; margin-bottom: 14px; }
+  .highlight .hl-label { font-size: 11px; color: var(--sf-blue); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; font-weight: 600; }
+  .highlight .hl-text { font-size: 13px; color: var(--sf-white); line-height: 1.5; }
+
+  /* Pill badge */
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .pill-blue { background: rgba(41,181,232,0.2); color: var(--sf-blue); border: 1px solid var(--sf-blue); }
+  .pill-green { background: rgba(46,204,113,0.15); color: var(--sf-green); border: 1px solid var(--sf-green); }
+  .pill-orange { background: rgba(243,156,18,0.15); color: var(--sf-orange); border: 1px solid var(--sf-orange); }
+  .pill-gray { background: rgba(138,160,184,0.15); color: var(--sf-gray); border: 1px solid var(--sf-gray); }
+
+  /* Flow */
+  .flow { display: flex; align-items: center; gap: 0; flex: 1; }
+  .flow-box { background: rgba(41,181,232,0.1); border: 1px solid rgba(41,181,232,0.3); border-radius: 8px; padding: 16px 14px; flex: 1; text-align: center; }
+  .flow-box .fb-num { font-size: 11px; color: var(--sf-blue); margin-bottom: 6px; font-weight: 600; }
+  .flow-box .fb-title { font-size: 13px; font-weight: 700; color: var(--sf-white); margin-bottom: 6px; }
+  .flow-box .fb-body { font-size: 11px; color: var(--sf-gray); line-height: 1.4; }
+  .flow-arrow { color: var(--sf-blue); font-size: 20px; padding: 0 6px; flex-shrink: 0; }
+
+  /* Table */
+  .ats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ats-table th { background: var(--sf-mid); color: var(--sf-blue); padding: 10px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .ats-table td { padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); color: var(--sf-gray); }
+  .ats-table tr:hover td { background: rgba(41,181,232,0.04); }
+  .ats-table td:first-child { color: var(--sf-white); font-weight: 600; }
+
+  /* Metric cards */
+  .metrics { display: flex; gap: 16px; margin-bottom: 24px; }
+  .metric { background: rgba(41,181,232,0.06); border: 1px solid rgba(41,181,232,0.2); border-radius: 8px; padding: 16px 20px; flex: 1; text-align: center; }
+  .metric .m-value { font-size: 32px; font-weight: 800; color: var(--sf-blue); }
+  .metric .m-label { font-size: 11px; color: var(--sf-gray); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+
+  /* Quote */
+  .quote { background: rgba(41,181,232,0.06); border: 1px solid rgba(41,181,232,0.2); border-radius: 8px; padding: 24px 28px; font-size: 16px; color: var(--sf-white); line-height: 1.6; font-style: italic; position: relative; }
+  .quote::before { content: '"'; font-size: 60px; color: var(--sf-blue); opacity: 0.4; position: absolute; top: -8px; left: 16px; line-height: 1; }
+  .quote .q-attr { margin-top: 14px; font-size: 12px; color: var(--sf-blue); font-style: normal; font-weight: 600; }
+
+  /* Two col layout */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; flex: 1; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; flex: 1; }
+
+  /* Check list */
+  .checklist { list-style: none; }
+  .checklist li { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; font-size: 13px; color: var(--sf-gray); line-height: 1.5; }
+  .checklist li::before { content: '✓'; color: var(--sf-green); font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  .checklist li strong { color: var(--sf-white); }
+
+  /* Section header within slide */
+  .section-hdr { font-size: 13px; font-weight: 700; color: var(--sf-blue); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid rgba(41,181,232,0.2); }
+
+  /* Architecture box */
+  .arch { display: grid; grid-template-columns: 1fr; gap: 8px; flex: 1; }
+  .arch-row { display: flex; gap: 8px; align-items: stretch; }
+  .arch-box { background: rgba(255,255,255,0.04); border: 1px solid rgba(41,181,232,0.2); border-radius: 6px; padding: 12px 14px; flex: 1; }
+  .arch-box.primary { border-color: var(--sf-blue); background: rgba(41,181,232,0.08); }
+  .arch-box .ab-label { font-size: 10px; color: var(--sf-blue); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .arch-box .ab-title { font-size: 13px; font-weight: 700; color: var(--sf-white); }
+  .arch-box .ab-body { font-size: 11px; color: var(--sf-gray); margin-top: 4px; line-height: 1.4; }
+
+  /* Divider */
+  .divider { height: 1px; background: rgba(41,181,232,0.15); margin: 16px 0; }
+
+  /* Small text */
+  .small { font-size: 11px; color: var(--sf-gray); line-height: 1.5; }
+  .body-text { font-size: 13px; color: var(--sf-gray); line-height: 1.6; margin-bottom: 12px; }
+  strong { color: var(--sf-white); }
+</style>
+</head>
+<body>
+
+<!-- SLIDE 1: TITLE -->
+<div class="slide title-slide active" id="slide-1">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Snowflake Professional Services</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:7%"></div></div>
+  <div class="content">
+    <div class="big-title">Agentic Transformation<br>Skill <span>v3</span></div>
+    <div class="tagline">AI-accelerated Bronze → Silver → Gold pipeline development, delivered entirely within your Snowflake account.</div>
+    <div class="meta">
+      <div class="meta-item"><span class="label">Version</span><span class="value">3.0 — June 2026</span></div>
+      <div class="meta-item"><span class="label">Delivery</span><span class="value">Snowflake Professional Services</span></div>
+      <div class="meta-item"><span class="label">Platform</span><span class="value">Snowflake Native — No External Dependencies</span></div>
+    </div>
+  </div>
+  <div class="title-decoration">ATS</div>
+  <div class="nav">
+    <button onclick="prevSlide()">← Prev</button>
+    <span class="counter" id="counter">1 / 14</span>
+    <button onclick="nextSlide()">Next →</button>
+  </div>
+</div>
+
+<!-- SLIDE 2: THE PROBLEM -->
+<div class="slide" id="slide-2">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">The Problem</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:14%"></div></div>
+  <div class="content">
+    <div class="slide-title">Pipeline Development is Slow, Manual, and Fragile</div>
+    <div class="slide-subtitle">The Bronze → Silver transformation layer is where most data engineering time is lost</div>
+    <div class="two-col" style="align-items:start; flex:unset; margin-bottom:20px;">
+      <div>
+        <div class="highlight">
+          <div class="hl-label">The Reality</div>
+          <div class="hl-text">Traditional Bronze → Silver pipeline development averages <strong>4–8 weeks</strong> for a mid-sized dataset portfolio. Each table requires manual schema discovery, DDL authoring, and validation scripting — repeated for every table, every business unit, every migration.</div>
+        </div>
+        <div class="highlight">
+          <div class="hl-label">The Bottleneck</div>
+          <div class="hl-text">Data engineers spend the majority of their time on <strong>repetitive, low-value work</strong>: reading column names, inferring business intent, writing CTAS statements, debugging NULL handling, and fixing type mismatches — before analytics work can begin.</div>
+        </div>
+      </div>
+      <div>
+        <div class="section-hdr">Common Pain Points</div>
+        <ul class="checklist">
+          <li><strong>No schema documentation</strong> — engineers reverse-engineer intent from column names</li>
+          <li><strong>Manual SQL handoffs</strong> — 1,000-line queries passed between teams, causing transcription errors</li>
+          <li><strong>Undocumented primary keys</strong> — dedup logic discovered through trial and error</li>
+          <li><strong>Repeated per-BU work</strong> — every new business unit restarts from scratch</li>
+          <li><strong>No feedback loop</strong> — learnings from one pipeline don't transfer to the next</li>
+          <li><strong>Multi-BU fan-out</strong> — one Silver table routing to 13+ Gold tables with banner-specific rules</li>
+        </ul>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="metric"><div class="m-value">4–8 wks</div><div class="m-label">Avg Bronze→Silver time</div></div>
+      <div class="metric"><div class="m-value">Days</div><div class="m-label">With ATS</div></div>
+      <div class="metric"><div class="m-value">100%</div><div class="m-label">Stays in Snowflake</div></div>
+      <div class="metric"><div class="m-value">0</div><div class="m-label">External dependencies</div></div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">2 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 3: WHAT IS ATS -->
+<div class="slide" id="slide-3">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Solution Overview</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:21%"></div></div>
+  <div class="content">
+    <div class="slide-title">What is the Agentic Transformation Skill?</div>
+    <div class="slide-subtitle">A Snowflake-native framework that turns your Bronze tables into analytics-ready Silver in days</div>
+    <div class="two-col">
+      <div>
+        <div class="body-text">ATS is an AI-powered pipeline framework deployed <strong>entirely within your Snowflake account</strong>. It uses a coordinated team of Cortex LLM agents to plan, execute, validate, and learn from each transformation — guided by your business rules and schema standards.</div>
+        <div class="body-text">Unlike traditional pipeline tools, ATS doesn't just automate SQL execution. It <strong>understands your data</strong> — discovering relationships, inferring transformation strategies, and capturing learnings that make every subsequent run smarter than the last.</div>
+        <div class="divider"></div>
+        <div class="section-hdr">What You Get</div>
+        <ul class="checklist">
+          <li><strong>Silver tables</strong> — transformed, validated, analytics-ready</li>
+          <li><strong>Schema contracts</strong> — structural rules encoded for repeatability</li>
+          <li><strong>Transformation directives</strong> — reusable business rules</li>
+          <li><strong>The ATS framework</strong> — deployed in your account for the duration of the engagement</li>
+          <li><strong>Full lineage + audit logs</strong> — every decision documented</li>
+          <li><strong>DCM export</strong> — production-ready deployment artifacts</li>
+        </ul>
+      </div>
+      <div>
+        <div class="section-hdr">What ATS Is Not</div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div class="card">
+            <div class="card-title">Not a Product</div>
+            <div class="card-body">ATS is delivered as part of a Snowflake PS engagement — no support contracts, versioned releases, or SLAs beyond engagement terms.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Not a No-Code Tool</div>
+            <div class="card-body">ATS accelerates data engineers — it does not replace them. Your team validates outputs, tunes directives, and adapts the framework.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Not an Ingestion Layer</div>
+            <div class="card-body">Bronze tables must already exist. ATS focuses on Bronze → Silver transformation and AI-proposed Gold/Analytics DDL.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Not the Nightly Pipeline</div>
+            <div class="card-body">ATS authors your pipeline logic. That logic is then operationalized into Tasks, Dynamic Tables, or dbt models that run independently.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">3 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 4: THE 5-PHASE PIPELINE -->
+<div class="slide" id="slide-4">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">How It Works</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:28%"></div></div>
+  <div class="content">
+    <div class="slide-title">Five-Phase Agentic Pipeline</div>
+    <div class="slide-subtitle">Each phase is a specialized AI agent with tools, guardrails, and self-correction</div>
+    <div class="flow" style="margin-bottom:24px;">
+      <div class="flow-box">
+        <div class="fb-num">Phase 1</div>
+        <div class="fb-title">🔍 Schema Analyst</div>
+        <div class="fb-body">Discovers FK relationships, entity references, and data patterns across all Bronze tables</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">
+        <div class="fb-num">Phase 2</div>
+        <div class="fb-title">📋 Planner</div>
+        <div class="fb-body">Decides transformation strategy per table — dedup, flatten, type-cast, SCD — with confidence scores</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">
+        <div class="fb-num">Phase 3</div>
+        <div class="fb-title">⚙️ Executor</div>
+        <div class="fb-body">Generates and runs Silver DDL with self-correction on failure and dry-run mode for safe review</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">
+        <div class="fb-num">Phase 4</div>
+        <div class="fb-title">✅ Validator</div>
+        <div class="fb-body">Checks row counts, PK uniqueness, and data quality thresholds against Bronze source</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">
+        <div class="fb-num">Phase 5</div>
+        <div class="fb-title">🧠 Reflector</div>
+        <div class="fb-body">Captures learnings from the run — stored in Cortex Search, surfaced in every future execution</div>
+      </div>
+    </div>
+    <div class="cards cards-3">
+      <div class="card accent">
+        <div class="card-icon">🎯</div>
+        <div class="card-title">Schema Contracts</div>
+        <div class="card-body">Structural rules defined before the LLM plans anything. CDC columns, naming conventions, NULL handling, type standards. The LLM must respect these — always.</div>
+      </div>
+      <div class="card accent">
+        <div class="card-icon">📌</div>
+        <div class="card-title">Transformation Directives</div>
+        <div class="card-body">Per-table business rules authored by your team. "For ORDERS, dedup on order_id + updated_at." "Treat LEGACY_ACCT_NUM as the PK." The human-in-the-loop control layer.</div>
+      </div>
+      <div class="card accent">
+        <div class="card-icon">📚</div>
+        <div class="card-title">Knowledge Corpus</div>
+        <div class="card-body">Every run produces learnings stored in Cortex Search. The Planner retrieves relevant prior learnings before planning each table — the system gets smarter with every run.</div>
+      </div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">4 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 5: SAFETY FIRST -->
+<div class="slide" id="slide-5">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Data Safety</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:35%"></div></div>
+  <div class="content">
+    <div class="slide-title">Built to Run Safely in Any Environment</div>
+    <div class="slide-subtitle">Three default safeguards protect existing data — greenfield or brownfield</div>
+    <div class="cards cards-3" style="margin-bottom:20px;">
+      <div class="card" style="border-color:var(--sf-green);border-top:3px solid var(--sf-green);">
+        <div class="card-icon">🔍</div>
+        <div class="card-title">Dry Run Mode</div>
+        <div class="card-body"><strong>Default: ON.</strong> Every pipeline run generates and logs DDL but executes nothing. Your team reviews every statement before a single table is touched. Execution requires explicit opt-in.</div>
+      </div>
+      <div class="card" style="border-color:var(--sf-green);border-top:3px solid var(--sf-green);">
+        <div class="card-icon">🛡️</div>
+        <div class="card-title">Overwrite Protection</div>
+        <div class="card-body"><strong>Default: OFF.</strong> If a target table already has rows, the Executor skips it, logs it, and continues. Existing data is never overwritten unless explicitly permitted — and only after dry run is also disabled.</div>
+      </div>
+      <div class="card" style="border-color:var(--sf-green);border-top:3px solid var(--sf-green);">
+        <div class="card-icon">🌾</div>
+        <div class="card-title">Brownfield Mode</div>
+        <div class="card-body"><strong>Skip-and-log.</strong> For environments with existing Silver tables, Brownfield Mode skips those tables entirely and processes only the gaps. Existing tables are logged as EXISTING and left untouched.</div>
+      </div>
+    </div>
+    <div class="highlight">
+      <div class="hl-label">Default behavior guarantee</div>
+      <div class="hl-text">A first run against <em>any</em> environment — greenfield or brownfield — produces <strong>zero side effects</strong> until your team has reviewed and approved the proposed DDL. No surprises, no accidents.</div>
+    </div>
+    <div class="divider"></div>
+    <div class="two-col" style="flex:unset;">
+      <div>
+        <div class="section-hdr">Conflict Handling</div>
+        <div class="small">When a target table conflict is detected, ATS automatically routes output to a staging schema (<code>OUTPUT_SCHEMA_STAGING</code>) for review — no data loss, no pipeline failure, full audit trail.</div>
+      </div>
+      <div>
+        <div class="section-hdr">Audit Trail</div>
+        <div class="small">Every decision — every generated DDL, every LLM plan, every validation result — is logged to <code>WORKFLOW_LOG</code> with timestamps, phases, and execution IDs. Full reproducibility guaranteed.</div>
+      </div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">5 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 6: ARCHITECTURE -->
+<div class="slide" id="slide-6">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Architecture</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:42%"></div></div>
+  <div class="content">
+    <div class="slide-title">Snowflake-Native Architecture</div>
+    <div class="slide-subtitle">Deploys into a single schema — no external services, no data leaving your account</div>
+    <div class="arch" style="gap:10px;">
+      <div class="arch-row">
+        <div class="arch-box primary" style="flex:3;">
+          <div class="ab-label">Interface Layer</div>
+          <div class="ab-title">Streamlit in Snowflake — 11-Tab Pipeline UI</div>
+          <div class="ab-body">Setup · Context · Documents · Contracts · Directives · Workflow · Analytics Builder · Registry · Observe · Partner Routing · DCM Export</div>
+        </div>
+      </div>
+      <div class="arch-row">
+        <div class="arch-box" style="flex:1;">
+          <div class="ab-label">Control Layer</div>
+          <div class="ab-title">Schema Contracts</div>
+          <div class="ab-body">Naming rules · type standards · CDC columns · NULL handling</div>
+        </div>
+        <div class="arch-box" style="flex:1;">
+          <div class="ab-label">Control Layer</div>
+          <div class="ab-title">Transformation Directives</div>
+          <div class="ab-body">Per-table business rules · priority ordering · active/inactive toggle</div>
+        </div>
+        <div class="arch-box" style="flex:1;">
+          <div class="ab-label">Knowledge Layer</div>
+          <div class="ab-title">Document Corpus</div>
+          <div class="ab-body">Business rules docs · naming conventions · domain glossaries → Cortex Search</div>
+        </div>
+      </div>
+      <div class="arch-row">
+        <div class="arch-box primary" style="flex:3;">
+          <div class="ab-label">Agentic Workflow Engine</div>
+          <div class="ab-title">Schema Analyst → Planner → Executor → Validator → Reflector</div>
+          <div class="ab-body">SQL Scripting Stored Procedures · Cortex LLM · Self-correction · Schema fingerprint caching · Cross-database output support</div>
+        </div>
+      </div>
+      <div class="arch-row">
+        <div class="arch-box" style="flex:1;">
+          <div class="ab-label">Registry</div>
+          <div class="ab-title">TABLE_LINEAGE_MAP</div>
+          <div class="ab-body">Bronze → Silver → Gold lineage · row counts · status</div>
+        </div>
+        <div class="arch-box" style="flex:1;">
+          <div class="ab-label">Memory</div>
+          <div class="ab-title">WORKFLOW_LEARNINGS</div>
+          <div class="ab-body">Reflector learnings · confidence scores · Cortex Search indexed</div>
+        </div>
+        <div class="arch-box" style="flex:1;">
+          <div class="ab-label">Gold Layer</div>
+          <div class="ab-title">Analytics Builder + DCM Export</div>
+          <div class="ab-body">AI-proposed Gold DDL · human review gate · manifest.yml · DEFINE TABLE · grants</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">6 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 7: THE 11 TABS -->
+<div class="slide" id="slide-7">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">The Application</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:49%"></div></div>
+  <div class="content">
+    <div class="slide-title">11-Tab Pipeline Management UI</div>
+    <div class="slide-subtitle">Every phase of the pipeline is accessible from a single Streamlit in Snowflake application</div>
+    <div class="cards cards-4" style="flex:1;">
+      <div class="card"><div class="card-icon">⚙️</div><div class="card-title">1. Setup</div><div class="card-body">Bootstrap framework, validate Cortex model, discover Bronze tables. Deploy in one click.</div></div>
+      <div class="card"><div class="card-icon">💡</div><div class="card-title">2. Context</div><div class="card-body">Set output schema, dry-run mode, pipeline type (CTAS/Dynamic Table), and overwrite policy.</div></div>
+      <div class="card"><div class="card-icon">📄</div><div class="card-title">3. Documents</div><div class="card-body">Upload business rules, naming conventions, and domain docs. Indexed into Cortex Search as Planner context.</div></div>
+      <div class="card"><div class="card-icon">📐</div><div class="card-title">4. Contracts</div><div class="card-body">Editable structural rules — CDC columns, timestamp conventions, NULL handling, dedup patterns.</div></div>
+      <div class="card"><div class="card-icon">🎯</div><div class="card-title">5. Directives</div><div class="card-body">Per-table transformation intent. Human-in-the-loop control over exactly how each table is handled.</div></div>
+      <div class="card accent"><div class="card-icon">🤖</div><div class="card-title">6. Workflow</div><div class="card-body">Run the 5-phase agentic pipeline. Live phase progress, resume from failure, per-table detail.</div></div>
+      <div class="card"><div class="card-icon">🏆</div><div class="card-title">7. Analytics Builder</div><div class="card-body">AI proposes Gold/Analytics DDL. Human review gate before execution or DCM export.</div></div>
+      <div class="card"><div class="card-icon">🗂️</div><div class="card-title">8. Registry</div><div class="card-body">Full Bronze → Silver → Gold lineage map with row counts and transformation strategy per table.</div></div>
+      <div class="card"><div class="card-icon">📊</div><div class="card-title">9. Observe</div><div class="card-body">Workflow KPIs, per-table execution results, active learnings, and run history.</div></div>
+      <div class="card"><div class="card-icon">🏷️</div><div class="card-title">10. Partner Routing</div><div class="card-body">Multi-banner config — one Silver table fans out to multiple Gold tables by dimension value.</div></div>
+      <div class="card"><div class="card-icon">📦</div><div class="card-title">11. DCM Export</div><div class="card-body">Generate deployable Database Change Management project — manifest, DDL, grants, expectations.</div></div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">7 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 8: MULTI-BANNER -->
+<div class="slide" id="slide-8">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Partner Routing</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:56%"></div></div>
+  <div class="content">
+    <div class="slide-title">Multi-Banner Partner Routing</div>
+    <div class="slide-subtitle">One Silver table → multiple Gold tables, routed by banner, region, store format, or any dimension value</div>
+    <div class="two-col">
+      <div>
+        <div class="body-text">Many enterprise customers have a <strong>fan-out pattern</strong> at the Gold layer: a single Silver product catalog routes to separate Gold tables per business unit, region, or store format — each with its own filtering rules, exclusions, and merge targets.</div>
+        <div class="body-text">ATS v3's Partner Routing module handles this natively. Configure once, validate against Silver, generate Gold-per-banner DDL ready for DCM export.</div>
+        <div class="divider"></div>
+        <div class="section-hdr">Routing Capabilities</div>
+        <ul class="checklist" style="margin-top:8px;">
+          <li><strong>Banner-level Silver filters</strong> — WHERE BANNER = 'superstore'</li>
+          <li><strong>Exclusion accounting</strong> — Gold = Silver minus excluded categories (validates correctly when Gold &lt; Silver)</li>
+          <li><strong>Merge targets</strong> — route minority banners into a shared Gold table</li>
+          <li><strong>Configurable thresholds</strong> — per-partner UPC variance tolerance</li>
+          <li><strong>Validation suite</strong> — full banner-level row count comparison before Gold build</li>
+        </ul>
+      </div>
+      <div>
+        <div class="section-hdr">Example: Large Grocery Retailer (14 banners → 13 Gold tables)</div>
+        <table class="ats-table" style="margin-top:8px; font-size:12px;">
+          <thead><tr><th>Banner</th><th>Silver Filter</th><th>Gold Table</th></tr></thead>
+          <tbody>
+            <tr><td>superstore</td><td>BANNER = 'superstore'</td><td>GOLD_SUPERSTORE</td></tr>
+            <tr><td>nofrills</td><td>BANNER = 'nofrills'</td><td>GOLD_NOFRILLS</td></tr>
+            <tr><td>maxi</td><td>BANNER = 'maxi'</td><td>GOLD_MAXI</td></tr>
+            <tr><td>independent</td><td>BANNER = 'independent'</td><td>GOLD_INDEPENDENT</td></tr>
+            <tr><td>icm</td><td>BANNER = 'icm'</td><td>→ GOLD_INDEPENDENT (merge)</td></tr>
+            <tr><td>rass</td><td>BANNER = 'rass'</td><td>GOLD_RASS</td></tr>
+          </tbody>
+        </table>
+        <div class="small" style="margin-top:10px;">Seed the config in one click. Validate all 14 banners against Silver row counts. Export as DCM project.</div>
+      </div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">8 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 9: DCM EXIT RAMP -->
+<div class="slide" id="slide-9">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Production Handoff</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:63%"></div></div>
+  <div class="content">
+    <div class="slide-title">DCM Export — The Production Exit Ramp</div>
+    <div class="slide-subtitle">ATS authors your pipeline. DCM packages it into production-ready deployment artifacts.</div>
+    <div class="two-col">
+      <div>
+        <div class="body-text">ATS is an accelerator, not a nightly pipeline. Once the transformation logic is validated, it needs to be <strong>operationalized into your existing deployment workflow</strong> — whether that's Tasks, Dynamic Tables, dbt models, or a CI/CD pipeline.</div>
+        <div class="body-text">The DCM Export generates a complete <strong>Database Change Management project</strong> that your data engineering team checks into git and deploys using the Snow CLI — no ATS required at runtime.</div>
+        <div class="divider"></div>
+        <div class="section-hdr">Generated Files</div>
+        <table class="ats-table" style="margin-top:8px; font-size:12px;">
+          <thead><tr><th>File</th><th>Contents</th></tr></thead>
+          <tbody>
+            <tr><td>manifest.yml</td><td>DCM project definition, roles, targets</td></tr>
+            <tr><td>infrastructure.sql</td><td>DEFINE SCHEMA statements</td></tr>
+            <tr><td>tables.sql</td><td>DEFINE TABLE for all Silver tables</td></tr>
+            <tr><td>analytics.sql</td><td>Gold/Analytics table DDL</td></tr>
+            <tr><td>access.sql</td><td>GRANT statements per role</td></tr>
+            <tr><td>expectations.sql</td><td>Data quality expectations on PK columns</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="section-hdr">Deployment Flow</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+          <div class="card accent"><div class="card-title">1. ATS generates Silver + Gold</div><div class="card-body">Pipeline runs, tables validated, Analytics Builder reviews Gold DDL</div></div>
+          <div class="card accent"><div class="card-title">2. Export DCM Project</div><div class="card-body">Click "Export" in the DCM tab — 6 files generated to a Snowflake stage</div></div>
+          <div class="card accent"><div class="card-title">3. Download + commit to git</div><div class="card-body">SA or customer downloads, reviews, commits to their source control</div></div>
+          <div class="card accent"><div class="card-title">4. Deploy via Snow CLI</div><div class="card-body"><code>snow dcm deploy</code> — production-ready deployment from the generated artifacts</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">9 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 10: USE CASE — MULTI-BU MIGRATION -->
+<div class="slide" id="slide-10">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Use Case</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:70%"></div></div>
+  <div class="content">
+    <div class="slide-title">Real-World Scenario: Multi-Business-Unit Migration</div>
+    <div class="slide-subtitle">The ATS pattern applied to a complex, multi-BU migration with legacy schemas and undocumented logic</div>
+    <div class="highlight" style="margin-bottom:16px;">
+      <div class="hl-label">The Situation</div>
+      <div class="hl-text">An enterprise is migrating 12–20 business units from on-premises SQL Server and legacy ETL to Snowflake. Each BU brings raw Bronze tables — claims, premiums, policy data — with legacy schemas, inconsistent NULLs, undocumented PKs, and transformation logic embedded in SSIS packages nobody fully understands.</div>
+    </div>
+    <div class="two-col">
+      <div>
+        <div class="section-hdr" style="color:var(--sf-red);">Traditional Approach</div>
+        <ul class="checklist" style="margin-top:8px;">
+          <li>Data engineer manually reverse-engineers each BU's schema</li>
+          <li>Writes Silver DDL by hand — weeks per business unit</li>
+          <li>Validation scripts written from scratch per table</li>
+          <li>No knowledge transfer between BUs — BU 12 starts from zero</li>
+          <li>4–8 weeks per BU × 20 BUs = <strong>up to 2+ years</strong></li>
+        </ul>
+      </div>
+      <div>
+        <div class="section-hdr" style="color:var(--sf-green);">With ATS</div>
+        <ul class="checklist" style="margin-top:8px;">
+          <li>Configure pipeline context once: domain, output schema, contracts</li>
+          <li>Add directives for known edge cases per BU</li>
+          <li>Agents plan and execute Silver transformation in <strong>days</strong></li>
+          <li>Reflector learnings from BU 1 inform BU 2's execution automatically</li>
+          <li>Pattern repeats across all 20 BUs at a fraction of the time and cost</li>
+        </ul>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="quote" style="font-size:13px; padding:16px 20px 16px 40px;">
+      "When the next business unit onboards, the framework already knows the domain. The Reflector's learnings from BU 1 inform BU 2's execution. The pattern repeats across all business units at a fraction of the cost and time of manual development."
+      <div class="q-attr">ATS Customer 1-Pager — PS Delivery Positioning</div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">10 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 11: DEPLOYMENT -->
+<div class="slide" id="slide-11">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Deployment</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:77%"></div></div>
+  <div class="content">
+    <div class="slide-title">Deploy in Minutes — One Command</div>
+    <div class="slide-subtitle">ATS deploys into a single schema in the customer's Snowflake account</div>
+    <div class="two-col">
+      <div>
+        <div class="section-hdr">Deploy via Snow CLI</div>
+        <div style="background:rgba(0,0,0,0.3);border:1px solid rgba(41,181,232,0.3);border-radius:6px;padding:14px 16px;font-family:monospace;font-size:12px;color:var(--sf-blue);margin-top:8px;margin-bottom:16px;line-height:1.8;">
+          ./setup/deploy.sh \<br>
+          &nbsp;&nbsp;--connection CUSTOMER_CONN \<br>
+          &nbsp;&nbsp;--database CUSTOMER_DB \<br>
+          &nbsp;&nbsp;--bronze-schema RAW \<br>
+          &nbsp;&nbsp;--warehouse COMPUTE_WH
+        </div>
+        <div class="section-hdr">Bootstrap Sequence</div>
+        <ul class="checklist" style="margin-top:8px;">
+          <li>Creates <code>TARGET_DB.AGENT_FRAMEWORK</code> schema</li>
+          <li>Deploys MODEL_CONFIG — auto-discovers available Cortex model</li>
+          <li>Deploys all stored procedures (12 scripts)</li>
+          <li>Discovers Bronze tables, seeds TABLE_LINEAGE_MAP</li>
+          <li>Seeds default Schema Contracts + Transformation Directives</li>
+          <li>Reports setup summary with table counts + model validation</li>
+        </ul>
+      </div>
+      <div>
+        <div class="section-hdr">What Gets Deployed</div>
+        <table class="ats-table" style="margin-top:8px; font-size:12px;">
+          <thead><tr><th>Component</th><th>Type</th></tr></thead>
+          <tbody>
+            <tr><td>AGENT_FRAMEWORK schema</td><td><span class="pill pill-blue">Schema</span></td></tr>
+            <tr><td>BOOTSTRAP, VALIDATE_MODEL</td><td><span class="pill pill-blue">SP</span></td></tr>
+            <tr><td>5-Phase Workflow Engine</td><td><span class="pill pill-blue">SP ×5</span></td></tr>
+            <tr><td>Gold Builder + DCM Export</td><td><span class="pill pill-blue">SP ×3</span></td></tr>
+            <tr><td>Partner Banner Config</td><td><span class="pill pill-blue">SP ×3</span></td></tr>
+            <tr><td>Cortex Search Service</td><td><span class="pill pill-gray">Optional</span></td></tr>
+            <tr><td>Semantic View</td><td><span class="pill pill-gray">Optional</span></td></tr>
+            <tr><td>Document Ingestion</td><td><span class="pill pill-gray">Optional</span></td></tr>
+            <tr><td>Streamlit Application</td><td><span class="pill pill-green">UI</span></td></tr>
+          </tbody>
+        </table>
+        <div class="small" style="margin-top:10px;">Optional scripts 10–12 are enhancement layers. Deploy failure warns but does not abort the core framework deploy.</div>
+      </div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">11 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 12: V3 VS V4 -->
+<div class="slide" id="slide-12">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Roadmap</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:84%"></div></div>
+  <div class="content">
+    <div class="slide-title">v3 Today, v4 on the Horizon</div>
+    <div class="slide-subtitle">v3 is the production-ready accelerator. v4 introduces Cortex Agents for fully autonomous operation.</div>
+    <div class="two-col" style="margin-bottom:16px;">
+      <div>
+        <div class="section-hdr" style="color:var(--sf-green);">v3 — Available Now</div>
+        <ul class="checklist" style="margin-top:8px;">
+          <li><strong>SQL Scripting SPs</strong> — GA on all Snowflake regions including Azure</li>
+          <li><strong>11-tab Streamlit UI</strong> — full pipeline management</li>
+          <li><strong>5-phase workflow</strong> — Schema Analyst through Reflector</li>
+          <li><strong>Documents tab</strong> — upload spec docs as Planner context</li>
+          <li><strong>Partner Routing</strong> — multi-banner fan-out support</li>
+          <li><strong>DCM Export</strong> — production deployment artifacts</li>
+          <li><strong>Semantic View</strong> — Cortex Analyst natural language queries over pipeline state</li>
+        </ul>
+      </div>
+      <div>
+        <div class="section-hdr" style="color:var(--sf-blue);">v4 — In Development</div>
+        <ul class="checklist" style="margin-top:8px;">
+          <li><strong>6 Cortex Agents</strong> — each phase becomes a full reasoning agent with tools</li>
+          <li><strong>35 ATS_TOOL_* SPs</strong> — granular tool library for agent orchestration</li>
+          <li><strong>Agent Hub + Chat + Orchestrate</strong> — 4 new agent-specific tabs</li>
+          <li><strong>Agent-to-agent consultation</strong> — Planner queries Reflector before planning</li>
+          <li><strong>Background discovery</strong> — Task-driven auto-detect of new Bronze tables</li>
+          <li><strong>Conversational checkpoints</strong> — agents pause and ask before proceeding</li>
+        </ul>
+      </div>
+    </div>
+    <div class="highlight">
+      <div class="hl-label">Maturity Arc</div>
+      <div class="hl-text">v3 is <strong>Level 2–3</strong> (LLM-assisted automation). v4 targets <strong>Level 4</strong> (agent-based operation) — where agents are the pipeline interface, each phase is a conversation, and the human role shifts from operator to approver. Full roadmap: <code>docs/agent_maturity_roadmap.md</code></div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">12 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 13: WHY SNOWFLAKE PS -->
+<div class="slide" id="slide-13">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Positioning</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:91%"></div></div>
+  <div class="content">
+    <div class="slide-title">Why ATS + Snowflake PS</div>
+    <div class="slide-subtitle">Differentiated value beyond the tooling</div>
+    <div class="cards cards-3" style="margin-bottom:20px;">
+      <div class="card accent">
+        <div class="card-icon">🏗️</div>
+        <div class="card-title">Accelerator, Not Product</div>
+        <div class="card-body">ATS is customized to your environment during the engagement — built to fit your schemas, your naming conventions, and your data standards from day one.</div>
+      </div>
+      <div class="card accent">
+        <div class="card-icon">🔒</div>
+        <div class="card-title">Data Never Leaves Your Account</div>
+        <div class="card-body">ATS runs entirely inside your Snowflake environment. No external APIs, no third-party services, no data egress. Cortex LLM inference stays within the Snowflake boundary.</div>
+      </div>
+      <div class="card accent">
+        <div class="card-icon">📈</div>
+        <div class="card-title">Gets Smarter Over Time</div>
+        <div class="card-body">The Reflector's learnings persist across runs. Every pipeline execution makes the next one better. By the 10th run, the system has domain knowledge your team didn't have to encode manually.</div>
+      </div>
+    </div>
+    <div class="two-col" style="flex:unset;">
+      <div>
+        <div class="section-hdr">Engagement Model</div>
+        <ul class="checklist" style="margin-top:8px;">
+          <li>Deploy ATS against 2–3 representative Bronze tables as a POC</li>
+          <li>Configure contracts + directives with customer's team</li>
+          <li>Run full pipeline end-to-end, validate outputs</li>
+          <li>Export DCM project, hand off to customer's deployment workflow</li>
+          <li>Framework validated end-to-end before engagement closes</li>
+        </ul>
+      </div>
+      <div>
+        <div class="section-hdr">Ideal Customer Profile</div>
+        <ul class="checklist" style="margin-top:8px;">
+          <li>Existing raw/Bronze layer in Snowflake (or being migrated to Snowflake)</li>
+          <li>Backlog of Silver/Gold pipeline development work</li>
+          <li>Multiple business units, sources, or schemas to transform</li>
+          <li>Data engineering team that will validate and operate the output</li>
+          <li>Interest in AI-accelerated development without replacing their engineers</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">13 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<!-- SLIDE 14: SUMMARY -->
+<div class="slide" id="slide-14">
+  <div class="hdr">
+    <img src="https://companieslogo.com/img/orig/SNOW-35164165.png" alt="Snowflake">
+    <span class="section-tag">Summary</span>
+  </div>
+  <div class="progress"><div class="progress-bar" style="width:100%"></div></div>
+  <div class="content">
+    <div class="slide-title">Key Takeaways</div>
+    <div class="slide-subtitle">Agentic Transformation Skill v3 — Snowflake Professional Services</div>
+    <div class="cards cards-3" style="margin-bottom:20px;">
+      <div class="card" style="border-top:3px solid var(--sf-blue);">
+        <div class="card-icon">⚡</div>
+        <div class="card-title">4–8 Weeks → Days</div>
+        <div class="card-body">Bronze → Silver pipeline development that traditionally takes months is reduced to days — with documented, repeatable, and extensible pipeline outputs.</div>
+      </div>
+      <div class="card" style="border-top:3px solid var(--sf-green);">
+        <div class="card-icon">🛡️</div>
+        <div class="card-title">Safe by Default</div>
+        <div class="card-body">Dry-run ON, overwrite protection OFF. First run against any environment produces zero side effects. Your existing data is always protected.</div>
+      </div>
+      <div class="card" style="border-top:3px solid var(--sf-orange);">
+        <div class="card-icon">🧠</div>
+        <div class="card-title">Learns As It Runs</div>
+        <div class="card-body">Reflector captures learnings after every run. The Planner retrieves them before the next. Run 10 is meaningfully better than Run 1 — automatically.</div>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="metric"><div class="m-value">11</div><div class="m-label">UI Tabs</div></div>
+      <div class="metric"><div class="m-value">5</div><div class="m-label">Pipeline Phases</div></div>
+      <div class="metric"><div class="m-value">12</div><div class="m-label">Deploy Scripts</div></div>
+      <div class="metric"><div class="m-value">0</div><div class="m-label">External Deps</div></div>
+      <div class="metric"><div class="m-value">GA</div><div class="m-label">Azure + All Regions</div></div>
+      <div class="metric"><div class="m-value">v4</div><div class="m-label">Agents on Horizon</div></div>
+    </div>
+    <div class="highlight">
+      <div class="hl-label">The Bottom Line</div>
+      <div class="hl-text">ATS is not a product — it is a <strong>PS-delivered accelerator</strong> that compresses months of data engineering work into days, leaves your team with a framework they own and understand, and gets smarter every time it runs. It runs entirely in Snowflake, requires no external services, and is safe to deploy against any environment.</div>
+    </div>
+  </div>
+  <div class="nav"><button onclick="prevSlide()">← Prev</button><span class="counter" id="counter">14 / 14</span><button onclick="nextSlide()">Next →</button></div>
+</div>
+
+<script>
+  let current = 1;
+  const total = 14;
+
+  function showSlide(n) {
+    document.querySelectorAll('.slide').forEach(s => s.classList.remove('active'));
+    document.getElementById('slide-' + n).classList.add('active');
+    document.querySelectorAll('.counter').forEach(c => c.textContent = n + ' / ' + total);
+    document.querySelectorAll('.progress-bar').forEach(b => b.style.width = (n / total * 100) + '%');
+    current = n;
+  }
+
+  function nextSlide() { if (current < total) showSlide(current + 1); }
+  function prevSlide() { if (current > 1) showSlide(current - 1); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+    if (e.key === 'ArrowLeft') prevSlide();
+  });
+
+  showSlide(1);
+</script>
+</body>
+</html>
