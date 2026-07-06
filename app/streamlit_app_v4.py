@@ -352,7 +352,7 @@ _NAV_GROUPS = [
 
 def render_sidebar():
     if "active_tab" not in st.session_state:
-        st.session_state["active_tab"] = 0
+        st.session_state["active_tab"] = "home"
 
     with st.sidebar:
         st.markdown(f"""
@@ -362,6 +362,17 @@ def render_sidebar():
   <div style="color:{SF_BLUE};font-size:0.72rem;margin-top:2px;">v4 · Cortex Agents</div>
 </div>
 """, unsafe_allow_html=True)
+
+        is_home = st.session_state["active_tab"] == "home"
+        if st.button(
+            "🏠  Home",
+            key="sidenav_home",
+            use_container_width=True,
+            type="primary" if is_home else "secondary",
+        ):
+            st.session_state["active_tab"] = "home"
+            st.rerun()
+        st.markdown("<div style='margin-bottom:4px'></div>", unsafe_allow_html=True)
 
         for group_label, items in _NAV_GROUPS:
             st.markdown(f'<div class="nav-section">{group_label}</div>', unsafe_allow_html=True)
@@ -3009,6 +3020,152 @@ def render_tool_inspector_tab():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Landing page
+# ─────────────────────────────────────────────────────────────────────────────
+
+_HOME_SECTIONS = [
+    {
+        "label": "Pipeline",
+        "icon": "⚙️",
+        "color": "#29B5E8",
+        "entry": 0,
+        "subtitle": "Configure, load context, and run the five-phase agentic transformation pipeline.",
+        "features": [
+            ("⚙️ Setup",       "Bootstrap Foundation tables, validate the Cortex model, and seed defaults."),
+            ("💡 Context",     "Set output schema, transformation mode, dry-run, and overwrite settings."),
+            ("📄 Documents",   "Upload domain docs and business context into the knowledge corpus."),
+            ("📐 Contracts",   "Define structural rules that govern your Silver layer schema."),
+            ("🎯 Directives",  "Set per-table business intent — dedup keys, grain, use-case goals."),
+            ("🤖 Workflow",    "Run the five-phase pipeline: Schema Analyst → Planner → Executor → Validator → Reflector."),
+        ],
+    },
+    {
+        "label": "Cortex Agents",
+        "icon": "🤖",
+        "color": "#9B59B6",
+        "entry": 1,
+        "subtitle": "Interact with live Cortex Agents — orchestrate, chat, and inspect the agentic layer.",
+        "features": [
+            ("🏠 Agent Hub",       "Live status dashboard for all deployed agents and tool SPs."),
+            ("🎯 Orchestrate",     "Trigger agent-to-agent pipeline runs with table selection and context."),
+            ("💬 Agent Chat",      "Conversational interface — ask any agent questions about your data."),
+            ("🔧 Tool Inspector",  "Browse all registered tool stored procedures and their signatures."),
+        ],
+    },
+    {
+        "label": "Analytics",
+        "icon": "📊",
+        "color": "#2ECC71",
+        "entry": 10,
+        "subtitle": "Build and validate the Analytics layer, review lineage, and monitor pipeline health.",
+        "features": [
+            ("🏆 Analytics Builder", "AI-proposed Gold and Analytics DDL with a human review and approval gate."),
+            ("🗂️ Registry",          "Full pipeline lineage map — Foundation → Enriched → Analytics row counts."),
+            ("📊 Observe",           "Workflow run history, cost attribution, learnings corpus, and phase logs."),
+        ],
+    },
+    {
+        "label": "Ops & Export",
+        "icon": "📦",
+        "color": "#F39C12",
+        "entry": 13,
+        "subtitle": "Route outputs by partner or business unit and export production-ready deployment packages.",
+        "features": [
+            ("🏷️ Partner Routing", "Configure output schema routing by business unit, region, or partner tag."),
+            ("📦 DCM Export",       "Generate a production-ready DCM manifest with DDL, grants, and DQ expectations."),
+        ],
+    },
+]
+
+
+def render_home_tab():
+    st.markdown(f"""
+<div style="background:linear-gradient(135deg,{SF_DARK} 0%,#0D1B2E 100%);
+            border-radius:10px;padding:28px 32px 28px;margin-bottom:8px;">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+    <div style="font-size:2.2rem;">🤖</div>
+    <div>
+      <div style="color:white;font-size:1.4rem;font-weight:800;letter-spacing:-0.5px;">
+        Agentic Transformation Skill <span style="color:{SF_BLUE};">v4</span>
+      </div>
+      <div style="color:{SF_BLUE};font-size:0.75rem;margin-top:3px;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;">
+        Cortex Agents · Snowflake Professional Services
+      </div>
+    </div>
+  </div>
+  <div style="color:#C8D8E8;font-size:0.925rem;max-width:740px;line-height:1.75;margin-bottom:20px;">
+    ATS v4 is a <strong style="color:white;">multi-agent data engineering framework</strong> that transforms
+    raw Bronze tables into validated, analytics-ready Silver data — powered by a coordinated team of
+    <strong style="color:white;">Cortex Agents</strong> running entirely inside your Snowflake account.
+    Where v3 used a sequential Snowflake Scripting pipeline, v4 routes each phase through
+    live Cortex Agents that can reason, self-correct, and collaborate — with full observability
+    at every step.
+  </div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;">
+    <div style="background:rgba(41,181,232,0.12);border:1px solid rgba(41,181,232,0.3);
+                border-radius:6px;padding:10px 16px;min-width:130px;text-align:center;">
+      <div style="color:{SF_BLUE};font-size:1.3rem;font-weight:800;">6</div>
+      <div style="color:#8AA0B8;font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;">Live Agents</div>
+    </div>
+    <div style="background:rgba(41,181,232,0.12);border:1px solid rgba(41,181,232,0.3);
+                border-radius:6px;padding:10px 16px;min-width:130px;text-align:center;">
+      <div style="color:{SF_BLUE};font-size:1.3rem;font-weight:800;">35+</div>
+      <div style="color:#8AA0B8;font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;">Tool SPs</div>
+    </div>
+    <div style="background:rgba(41,181,232,0.12);border:1px solid rgba(41,181,232,0.3);
+                border-radius:6px;padding:10px 16px;min-width:130px;text-align:center;">
+      <div style="color:{SF_BLUE};font-size:1.3rem;font-weight:800;">15</div>
+      <div style="color:#8AA0B8;font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;">App Sections</div>
+    </div>
+    <div style="background:rgba(41,181,232,0.12);border:1px solid rgba(41,181,232,0.3);
+                border-radius:6px;padding:10px 16px;min-width:130px;text-align:center;">
+      <div style="color:{SF_BLUE};font-size:1.3rem;font-weight:800;">4–8 wks → Days</div>
+      <div style="color:#8AA0B8;font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;">Time to Silver</div>
+    </div>
+  </div>
+</div>
+<div style="color:#8AA0B8;font-size:0.75rem;text-align:right;margin-bottom:20px;padding-right:4px;">
+  Select a section below to get started
+</div>
+""", unsafe_allow_html=True)
+
+    cols = st.columns(2, gap="large")
+    for i, section in enumerate(_HOME_SECTIONS):
+        col = cols[i % 2]
+        with col:
+            feature_rows = ""
+            for feat, desc in section["features"]:
+                feature_rows += (
+                    f'<div style="display:flex;gap:10px;align-items:flex-start;padding:5px 0;'
+                    f'border-bottom:1px solid #EEF2F7;font-size:0.8rem;">'
+                    f'<span style="color:{section["color"]};font-weight:700;flex-shrink:0;">›</span>'
+                    f'<div><span style="font-weight:700;color:#1A2A3A;">{feat}</span>'
+                    f'<span style="color:#6A7A8A;margin-left:6px;">{desc}</span></div></div>'
+                )
+            st.markdown(f"""
+<div style="background:white;border:1px solid #D0DCE8;border-top:4px solid {section['color']};
+            border-radius:8px;padding:20px 22px 18px;margin-bottom:18px;">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+    <span style="font-size:1.4rem;">{section['icon']}</span>
+    <span style="font-size:1.05rem;font-weight:800;color:#11213B;">{section['label']}</span>
+  </div>
+  <div style="font-size:0.8rem;color:#4A5A6A;margin-bottom:14px;line-height:1.5;">
+    {section['subtitle']}
+  </div>
+  {feature_rows}
+</div>
+""", unsafe_allow_html=True)
+            if st.button(
+                f"Open {section['label']} →",
+                key=f"home_nav_{i}",
+                use_container_width=True,
+                type="primary" if section['color'] == SF_BLUE else "secondary",
+            ):
+                st.session_state["active_tab"] = section["entry"]
+                st.rerun()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -3051,9 +3208,12 @@ def main():
     ]
 
     if "active_tab" not in st.session_state:
-        st.session_state["active_tab"] = 0
+        st.session_state["active_tab"] = "home"
 
-    TAB_RENDER[st.session_state["active_tab"]]()
+    if st.session_state["active_tab"] == "home":
+        render_home_tab()
+    else:
+        TAB_RENDER[st.session_state["active_tab"]]()
 
 
 if __name__ == "__main__":
