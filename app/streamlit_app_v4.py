@@ -2178,7 +2178,12 @@ def render_registry_tab():
     st.subheader("Pipeline Lineage & Relationships")
 
     ctx = _db_context()
-    reg_tab1, reg_tab2 = st.tabs(["📊 Pipeline Flow", "🔗 Discovered Relationships"])
+    reg_tab1, reg_tab2, reg_tab3, reg_tab4 = st.tabs([
+        "📊 Pipeline Flow",
+        "🔍 Staleness",
+        "💥 Impact Analysis",
+        "🔗 Discovered Relationships",
+    ])
 
     with reg_tab1:
         lineage_df = run_query("""
@@ -2260,6 +2265,124 @@ def render_registry_tab():
             st.info("No lineage data yet. Run the Agentic Workflow to populate.")
 
     with reg_tab2:
+        st.caption("Compare live Bronze row counts against the snapshot taken at last pipeline run.")
+        if st.button("🔄 Run Staleness Check", type="primary", key="staleness_btn"):
+            with st.spinner("Checking Bronze sources..."):
+                raw = run_call("CALL AGENT_FRAMEWORK.ATS_TOOL_CHECK_PIPELINE_STALENESS()")
+            st.session_state["staleness_result"] = raw
+
+        if "staleness_result" in st.session_state:
+            import json as _json
+            try:
+                data = _json.loads(st.session_state["staleness_result"])
+                tables = data.get("tables", [])
+                s1, s2, s3 = st.columns(3)
+                s1.metric("Total Tables",  data.get("total_tables", 0))
+                s2.metric("Fresh",         data.get("fresh_tables", 0))
+                s3.metric("Stale",         data.get("stale_tables", 0),
+                          delta_color="inverse" if data.get("stale_tables", 0) > 0 else "off")
+                st.markdown("---")
+                for t in tables:
+                    stale  = t.get("stale")
+                    delta  = t.get("delta")
+                    icon   = "⚠️" if stale else "✅"
+                    stored = t.get("stored_count", 0)
+                    live   = t.get("live_count")
+                    delta_str = f"+{delta:,}" if delta and delta > 0 else (f"{delta:,}" if delta else "—")
+                    c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 1])
+                    c1.markdown(f"**{t['table']}**  \n`{t['fqn']}`")
+                    c2.markdown(f"Stored: `{stored:,}`")
+                    c3.markdown(f"Live: `{live:,}`" if live is not None else "Live: *unavailable*")
+                    c4.markdown(f"{icon} `{delta_str}`")
+                    st.markdown("---")
+            except Exception as e:
+                st.error(f"Parse error: {e}")
+                st.json(st.session_state["staleness_result"])
+
+    with reg_tab3:
+        st.caption("Downstream Silver dependencies and FK relationships for any Bronze table.")
+        lineage_tables = run_query("""
+            SELECT bronze_table FROM AGENT_FRAMEWORK.TABLE_LINEAGE_MAP
+            WHERE silver_status = 'COMPLETE' ORDER BY bronze_table
+        """)
+        if lineage_tables.empty:
+            st.info("No completed Silver tables yet.")
+        else:
+            tbl_choice = st.selectbox(
+                "Select Bronze table",
+                options=lineage_tables["BRONZE_TABLE"].tolist(),
+                key="impact_table_sel"
+            )
+            imp_col1, imp_col2 = st.columns(2)
+            if imp_col1.button("🔍 Get Impact", type="primary", key="impact_btn"):
+                with st.spinner("Analysing dependencies..."):
+                    raw = run_call(f"CALL AGENT_FRAMEWORK.ATS_TOOL_GET_TABLE_IMPACT('{tbl_choice}')")
+                st.session_state["impact_result"] = raw
+
+            if imp_col2.button("📄 View Silver DDL", key="ddl_btn"):
+                with st.spinner("Fetching DDL..."):
+                    raw = run_call(f"CALL AGENT_FRAMEWORK.ATS_TOOL_GET_SILVER_DDL('{tbl_choice}')")
+                st.session_state["ddl_result"] = raw
+
+            if "impact_result" in st.session_state:
+                import json as _json
+                try:
+                    data = _json.loads(st.session_state["impact_result"])
+                    st.markdown(f"#### Impact: `{data.get('table')}`")
+                    silver_out = data.get("silver_output") or []
+                    if silver_out:
+                        st.markdown("**Silver output tables:**")
+                        for s in silver_out:
+                            status_icon = "✅" if s.get("silver_status") == "COMPLETE" else "⏳"
+                            st.markdown(
+                                f"{status_icon} `{s.get('silver_schema')}.{s.get('silver_table')}`"
+                                f" — {s.get('row_count', 0):,} rows"
+                            )
+                    refs_in = data.get("tables_that_reference_this") or []
+                    if refs_in:
+                        st.markdown("**Tables that FK-reference this table:**")
+                        for r in refs_in:
+                            st.markdown(
+                                f"🔑 `{r['dependent_table']}`.`{r['fk_column']}` → "
+                                f"`{r['references_column']}` ({r['confidence']}% confidence)"
+                            )
+                    refs_out = data.get("tables_this_references") or []
+                    if refs_out:
+                        st.markdown("**Tables this table references:**")
+                        for r in refs_out:
+                            st.markdown(
+                                f"🔗 `{r['fk_column']}` → "
+                                f"`{r['parent_table']}`.`{r['references_column']}` ({r['confidence']}% confidence)"
+                            )
+                    if not silver_out and not refs_in and not refs_out:
+                        st.info("No dependencies found for this table.")
+                except Exception as e:
+                    st.error(f"Parse error: {e}")
+
+            if "ddl_result" in st.session_state:
+                import json as _json
+                st.markdown("---")
+                try:
+                    data = _json.loads(st.session_state["ddl_result"])
+                    if "error" in data:
+                        st.warning(data["error"])
+                    else:
+                        cols_parsed = data.get("columns", [])
+                        dc1, dc2 = st.columns(2)
+                        dc1.metric("Bronze Rows", f"{data.get('row_count_bronze', 0):,}")
+                        dc2.metric("Silver Rows", f"{data.get('row_count_silver', 0):,}")
+                        if cols_parsed:
+                            st.markdown(f"**Columns ({len(cols_parsed)}):** " +
+                                        " · ".join(f"`{c}`" for c in cols_parsed))
+                        ddl = data.get("silver_ddl", "")
+                        if ddl:
+                            st.code(ddl, language="sql")
+                        else:
+                            st.info("No DDL stored yet. Re-run the pipeline to capture DDL.")
+                except Exception as e:
+                    st.error(f"Parse error: {e}")
+
+    with reg_tab4:
         llm_rels_df = run_query("""
             SELECT
                 SPLIT_PART(sr.source_table, '.', -1)  AS FROM_TABLE,

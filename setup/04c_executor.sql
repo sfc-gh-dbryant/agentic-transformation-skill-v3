@@ -468,6 +468,13 @@ DIRECTIVES:
                         updated_at        = CURRENT_TIMESTAMP()
                     WHERE bronze_table = SPLIT_PART(:cur_source_table, '.', -1);
 
+                    -- Delegate DDL recording to isolated lineage tool
+                    CALL AGENT_FRAMEWORK.ATS_TOOL_RECORD_SILVER_DDL(
+                        SPLIT_PART(:cur_source_table, '.', -1),
+                        :generated_sql,
+                        :execution_id
+                    );
+
                     INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
                     SELECT :execution_id, 'EXECUTOR', 'OK',
                            SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :effective_target_fqn ||
@@ -511,6 +518,14 @@ DIRECTIVES:
                         last_refreshed_at = CURRENT_TIMESTAMP(),
                         updated_at        = CURRENT_TIMESTAMP()
                     WHERE bronze_table = SPLIT_PART(:cur_source_table, '.', -1);
+
+                    -- Delegate DDL recording to isolated lineage tool
+                    CALL AGENT_FRAMEWORK.ATS_TOOL_RECORD_SILVER_DDL(
+                        SPLIT_PART(:cur_source_table, '.', -1),
+                        :generated_sql,
+                        :execution_id
+                    );
+
                     INSERT INTO AGENT_FRAMEWORK.WORKFLOW_LOG (execution_id, phase, status, message)
                     SELECT :execution_id, 'EXECUTOR', 'OK',
                            SPLIT_PART(:cur_source_table, '.', -1) || ' → ' || :effective_target_fqn ||
