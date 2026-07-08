@@ -17,11 +17,18 @@ USE WAREHOUSE IDENTIFIER($WAREHOUSE);
 CREATE OR REPLACE AGENT AGENT_FRAMEWORK.ATS_SCHEMA_ANALYST_AGENT
 FROM SPECIFICATION $$
 {
-  "models": { "orchestration": "auto" },
-  "orchestration": { "budget": { "seconds": 300, "tokens": 200000 } },
+  "models": {
+    "orchestration": "auto"
+  },
+  "orchestration": {
+    "budget": {
+      "seconds": 300,
+      "tokens": 200000
+    }
+  },
   "instructions": {
-    "orchestration": "You are the Schema Analyst for the Agentic Transformation Skill. Your job is to discover foreign-key and entity-reference relationships across Bronze tables so the Planner can make informed transformation decisions.\n\nFor each table in scope:\n1. Call discover_schema to get its column list and types.\n2. Look for columns that could be FKs (ID columns, code columns, columns matching names in other tables).\n3. When you suspect a relationship, call sample_data on both tables to verify the values actually match — do not declare a FK without checking real data.\n4. Call search_relationships to check if we already know about similar relationships from prior runs.\n5. Return a structured list of confirmed relationships with confidence scores (0.0–1.0) based on how many sample values matched.\n\nOnly declare a relationship if you have evidence. A confidence of 0.95+ means values matched in samples. 0.7–0.94 means pattern-based suspicion. Below 0.7, skip it.",
-    "response": "Return a JSON object with fields: execution_id, relationships (array of {source_table, source_column, target_table, target_column, relationship_type, confidence, evidence}), tables_analyzed (count), and summary (one sentence)."
+    "response": "Return a JSON object with fields: execution_id, relationships (array of {source_table, source_column, target_table, target_column, relationship_type, confidence, evidence}), tables_analyzed (count), and summary (one sentence).",
+    "orchestration": "You are the Schema Analyst for the Agentic Transformation Skill. Your job is to discover foreign-key and entity-reference relationships across Bronze tables so the Planner can make informed transformation decisions.\n\nFor each table in scope:\n1. Call discover_schema to get its column list and types.\n2. Look for columns that could be FKs (ID columns, code columns, columns matching names in other tables).\n3. When you suspect a relationship, call sample_data on both tables to verify the values actually match \u2014 do not declare a FK without checking real data.\n4. Call search_relationships to check if we already know about similar relationships from prior runs.\n5. Return a structured list of confirmed relationships with confidence scores (0.0\u20131.0) based on how many sample values matched.\n\nOnly declare a relationship if you have evidence. A confidence of 0.95+ means values matched in samples. 0.7\u20130.94 means pattern-based suspicion. Below 0.7, skip it."
   },
   "tools": [
     {
@@ -32,9 +39,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "fqn": { "type": "string", "description": "Fully qualified table name: DATABASE.SCHEMA.TABLE" }
+            "fqn": {
+              "type": "string",
+              "description": "Fully qualified table name: DATABASE.SCHEMA.TABLE"
+            }
           },
-          "required": ["fqn"]
+          "required": [
+            "fqn"
+          ]
         }
       }
     },
@@ -46,10 +58,19 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "fqn": { "type": "string", "description": "Fully qualified table name" },
-            "n": { "type": "integer", "description": "Number of rows to sample (max 20)" }
+            "fqn": {
+              "type": "string",
+              "description": "Fully qualified table name"
+            },
+            "n": {
+              "type": "integer",
+              "description": "Number of rows to sample (max 20)"
+            }
           },
-          "required": ["fqn", "n"]
+          "required": [
+            "fqn",
+            "n"
+          ]
         }
       }
     },
@@ -61,9 +82,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "query": { "type": "string", "description": "Search query describing the relationship or table names" }
+            "query": {
+              "type": "string",
+              "description": "Search query describing the relationship or table names"
+            }
           },
-          "required": ["query"]
+          "required": [
+            "query"
+          ]
         }
       }
     },
@@ -75,10 +101,57 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "db": { "type": "string", "description": "Database name" },
-            "schema_name": { "type": "string", "description": "Schema name" }
+            "db": {
+              "type": "string",
+              "description": "Database name"
+            },
+            "schema_name": {
+              "type": "string",
+              "description": "Schema name"
+            }
           },
-          "required": ["db", "schema_name"]
+          "required": [
+            "db",
+            "schema_name"
+          ]
+        }
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "get_table_impact",
+        "description": "Returns downstream Silver dependencies and FK relationships for a given table.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "table_name": {
+              "type": "string",
+              "description": "str - Unqualified Bronze table name"
+            }
+          },
+          "required": [
+            "table_name"
+          ]
+        }
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "get_silver_ddl",
+        "description": "Returns stored Silver DDL and parsed column list for a Bronze table.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "bronze_table": {
+              "type": "string",
+              "description": "str - Unqualified Bronze table name"
+            }
+          },
+          "required": [
+            "bronze_table"
+          ]
         }
       }
     }
@@ -87,42 +160,76 @@ FROM SPECIFICATION $$
     "discover_schema": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_DISCOVER_SCHEMA",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     },
     "sample_data": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_SAMPLE_DATA",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     },
     "search_relationships": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_SEARCH_RELATIONSHIPS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     },
     "list_tables": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_LIST_TABLES",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
+    },
+    "get_table_impact": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_TABLE_IMPACT",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
+    },
+    "get_silver_ddl": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_SILVER_DDL",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     }
   }
 }
 $$;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 2. PLANNER AGENT
--- Decides transformation strategy and PK columns for each table.
--- Tools: get_pipeline_context, get_contracts, get_directives,
---        get_schema_relationships, search_prior_decisions, get_gold_schemas
--- ─────────────────────────────────────────────────────────────────────────────
-
 CREATE OR REPLACE AGENT AGENT_FRAMEWORK.ATS_PLANNER_AGENT
 FROM SPECIFICATION $$
 {
-  "models": { "orchestration": "auto" },
-  "orchestration": { "budget": { "seconds": 300, "tokens": 300000 } },
+  "models": {
+    "orchestration": "auto"
+  },
+  "orchestration": {
+    "budget": {
+      "seconds": 300,
+      "tokens": 300000
+    }
+  },
   "instructions": {
-    "orchestration": "You are the Planner for the Agentic Transformation Skill. For each Bronze table, you decide the transformation strategy and identify the primary key columns for the Silver layer.\n\nFor each table:\n1. Call get_pipeline_context to understand the business domain and analytics goals.\n2. Call get_contracts('SILVER') to get the structural rules that must be followed.\n3. Call get_directives with the table name to find any specific transformation instructions.\n4. Call get_schema_relationships to see what FK relationships the Schema Analyst found.\n5. Call search_prior_decisions with the table name to check if we have prior learnings about this table — if a prior run succeeded or failed, use that knowledge to adjust the strategy.\n6. Decide the strategy: one of 'direct_select', 'deduplicate', 'flatten_and_type', 'pivot', 'union', or 'composite_key_dedup'.\n7. Identify the primary key column(s) — these MUST be real column names from the source table.\n8. Call save_decision once per table with all fields populated. Use execution_id='agent_direct' if no execution_id was provided. Never skip save_decision — decisions that are not saved cannot be used by the Executor.\n\nNever invent column names. If you are unsure about a column name, note it as 'unknown' rather than guessing.",
-    "response": "Return a JSON array of decisions, one per table: [{source_table, transformation_strategy, pk_columns (comma-separated), recommended_actions, llm_reasoning, confidence_score (0.0-1.0)}]"
+    "response": "Return a JSON array of decisions, one per table: [{source_table, transformation_strategy, pk_columns (comma-separated), recommended_actions, llm_reasoning, confidence_score (0.0-1.0)}]",
+    "orchestration": "You are the Planner for the Agentic Transformation Skill. For each Bronze table, you decide the transformation strategy and identify the primary key columns for the Silver layer.\n\nFor each table:\n1. Call get_pipeline_context to understand the business domain and analytics goals.\n2. Call get_contracts('SILVER') to get the structural rules that must be followed.\n3. Call get_directives with the table name to find any specific transformation instructions.\n4. Call get_schema_relationships to see what FK relationships the Schema Analyst found.\n5. Call search_prior_decisions with the table name to check if we have prior learnings about this table \u2014 if a prior run succeeded or failed, use that knowledge to adjust the strategy.\n6. Decide the strategy: one of 'direct_select', 'deduplicate', 'flatten_and_type', 'pivot', 'union', or 'composite_key_dedup'.\n7. Identify the primary key column(s) \u2014 these MUST be real column names from the source table.\n8. Call save_decision once per table with all fields populated. Use execution_id='agent_direct' if no execution_id was provided. Never skip save_decision \u2014 decisions that are not saved cannot be used by the Executor.\n\nNever invent column names. If you are unsure about a column name, note it as 'unknown' rather than guessing."
   },
   "tools": [
     {
@@ -130,7 +237,10 @@ FROM SPECIFICATION $$
         "type": "generic",
         "name": "get_pipeline_context",
         "description": "Returns the current pipeline context: business description, data domain, analytics goals, constraints, output schema, and safety settings. Always call this first.",
-        "input_schema": { "type": "object", "properties": {} }
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
       }
     },
     {
@@ -141,9 +251,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "layer": { "type": "string", "description": "Layer to get contracts for: SILVER or GOLD" }
+            "layer": {
+              "type": "string",
+              "description": "Layer to get contracts for: SILVER or GOLD"
+            }
           },
-          "required": ["layer"]
+          "required": [
+            "layer"
+          ]
         }
       }
     },
@@ -151,13 +266,18 @@ FROM SPECIFICATION $$
       "tool_spec": {
         "type": "generic",
         "name": "get_directives",
-        "description": "Returns Transformation Directives for a table — specific business instructions that override general strategy. Always check this before deciding strategy.",
+        "description": "Returns Transformation Directives for a table \u2014 specific business instructions that override general strategy. Always check this before deciding strategy.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "table_pattern": { "type": "string", "description": "Table name to match against directives" }
+            "table_pattern": {
+              "type": "string",
+              "description": "Table name to match against directives"
+            }
           },
-          "required": ["table_pattern"]
+          "required": [
+            "table_pattern"
+          ]
         }
       }
     },
@@ -169,9 +289,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
         }
       }
     },
@@ -183,9 +308,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "query": { "type": "string", "description": "Search query using table name and transformation context" }
+            "query": {
+              "type": "string",
+              "description": "Search query using table name and transformation context"
+            }
           },
-          "required": ["query"]
+          "required": [
+            "query"
+          ]
         }
       }
     },
@@ -194,7 +324,10 @@ FROM SPECIFICATION $$
         "type": "generic",
         "name": "get_gold_schemas",
         "description": "Returns the current Bronze-to-Silver-to-Gold lineage map showing what tables already exist and what is pending. Use to understand the current state before planning.",
-        "input_schema": { "type": "object", "properties": {} }
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
       }
     },
     {
@@ -205,15 +338,44 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id":              { "type": "string",  "description": "Workflow execution ID — use 'agent_direct' if running outside a pipeline" },
-            "source_table":              { "type": "string",  "description": "Fully qualified Bronze table FQN" },
-            "transformation_strategy":   { "type": "string",  "description": "One of: direct_select, deduplicate, flatten_and_type, pivot, union, composite_key_dedup" },
-            "pk_columns":                { "type": "string",  "description": "Primary key column(s) — comma-separated. Use 'unknown' if not confirmed." },
-            "recommended_actions":       { "type": "string",  "description": "Plain-text description of recommended transformation actions" },
-            "llm_reasoning":             { "type": "string",  "description": "Reasoning behind the strategy choice" },
-            "confidence_score":          { "type": "number",  "description": "Confidence score between 0.0 and 1.0" }
+            "execution_id": {
+              "type": "string",
+              "description": "Workflow execution ID \u2014 use 'agent_direct' if running outside a pipeline"
+            },
+            "source_table": {
+              "type": "string",
+              "description": "Fully qualified Bronze table FQN"
+            },
+            "transformation_strategy": {
+              "type": "string",
+              "description": "One of: direct_select, deduplicate, flatten_and_type, pivot, union, composite_key_dedup"
+            },
+            "pk_columns": {
+              "type": "string",
+              "description": "Primary key column(s) \u2014 comma-separated. Use 'unknown' if not confirmed."
+            },
+            "recommended_actions": {
+              "type": "string",
+              "description": "Plain-text description of recommended transformation actions"
+            },
+            "llm_reasoning": {
+              "type": "string",
+              "description": "Reasoning behind the strategy choice"
+            },
+            "confidence_score": {
+              "type": "number",
+              "description": "Confidence score between 0.0 and 1.0"
+            }
           },
-          "required": ["execution_id", "source_table", "transformation_strategy", "pk_columns", "recommended_actions", "llm_reasoning", "confidence_score"]
+          "required": [
+            "execution_id",
+            "source_table",
+            "transformation_strategy",
+            "pk_columns",
+            "recommended_actions",
+            "llm_reasoning",
+            "confidence_score"
+          ]
         }
       }
     }
@@ -222,69 +384,103 @@ FROM SPECIFICATION $$
     "get_pipeline_context": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_PIPELINE_CONTEXT",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "get_contracts": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_CONTRACTS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "get_directives": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_DIRECTIVES",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "get_schema_relationships": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_SCHEMA_RELATIONSHIPS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "search_prior_decisions": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_SEARCH_PRIOR_DECISIONS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "get_gold_schemas": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_GOLD_SCHEMAS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "save_decision": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_SAVE_PLANNER_DECISION",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     }
   }
 }
 $$;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 3. EXECUTOR AGENT
--- Generates and executes Silver-layer DDL with tool-grounded column validation.
--- Tools: get_columns, execute_ddl, validate_column, check_table_exists, get_sample_rows
--- ─────────────────────────────────────────────────────────────────────────────
-
 CREATE OR REPLACE AGENT AGENT_FRAMEWORK.ATS_EXECUTOR_AGENT
 FROM SPECIFICATION $$
 {
-  "models": { "orchestration": "auto" },
-  "orchestration": { "budget": { "seconds": 600, "tokens": 400000 } },
+  "models": {
+    "orchestration": "auto"
+  },
+  "orchestration": {
+    "budget": {
+      "seconds": 600,
+      "tokens": 400000
+    }
+  },
   "instructions": {
-    "orchestration": "You are the Executor for the Agentic Transformation Skill. You generate and execute Silver-layer DDL for each Bronze table based on the Planner's decisions.\n\nFor each table:\n1. Call get_columns with the source table FQN to get the EXACT column list. You MUST use only these column names — never invent names.\n2. Call check_table_exists on the target output table. If it exists with rows and dry_run=FALSE, stop and report TARGET_EXISTS_NO_OVERWRITE unless brownfield_mode is TRUE.\n3. Optionally call get_sample_rows to understand the actual data values before writing transformation logic.\n4. Generate the DDL using ONLY the column names returned by get_columns. Every column in your SELECT must appear in that list.\n5. Before finalising, call validate_column for any column you are uncertain about.\n6. Call execute_ddl with the execution_id and the clean DDL (no markdown fences, no semicolons at the end).\n7. If execute_ddl returns FAILED, diagnose the error, call get_columns again, and regenerate with corrected column names.\n\nThe key rule: call get_columns FIRST, ALWAYS. Zero column hallucination is the goal.",
-    "response": "Return a JSON object with: execution_id, results (array of {table, target, status, retries, error}), success_count, fail_count, dry_run (bool)."
+    "response": "Return a JSON object with: execution_id, results (array of {table, target, status, retries, error}), success_count, fail_count, dry_run (bool).",
+    "orchestration": "You are the Executor for the Agentic Transformation Skill. You generate and execute Silver-layer DDL for each Bronze table based on the Planner's decisions.\n\nFor each table:\n1. Call get_columns with the source table FQN to get the EXACT column list. You MUST use only these column names \u2014 never invent names.\n2. Call check_table_exists on the target output table. If it exists with rows and dry_run=FALSE, stop and report TARGET_EXISTS_NO_OVERWRITE unless brownfield_mode is TRUE.\n3. Optionally call get_sample_rows to understand the actual data values before writing transformation logic.\n4. Generate the DDL using ONLY the column names returned by get_columns. Every column in your SELECT must appear in that list.\n5. Before finalising, call validate_column for any column you are uncertain about.\n6. Call execute_ddl with the execution_id and the clean DDL (no markdown fences, no semicolons at the end).\n7. If execute_ddl returns FAILED, diagnose the error, call get_columns again, and regenerate with corrected column names.\n\nThe key rule: call get_columns FIRST, ALWAYS. Zero column hallucination is the goal."
   },
   "tools": [
     {
       "tool_spec": {
         "type": "generic",
         "name": "get_columns",
-        "description": "Returns the exact column list from INFORMATION_SCHEMA for a fully-qualified table. ALWAYS call this before generating any DDL — use only these column names in your SELECT.",
+        "description": "Returns the exact column list from INFORMATION_SCHEMA for a fully-qualified table. ALWAYS call this before generating any DDL \u2014 use only these column names in your SELECT.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "fqn": { "type": "string", "description": "Fully qualified table name: DATABASE.SCHEMA.TABLE" }
+            "fqn": {
+              "type": "string",
+              "description": "Fully qualified table name: DATABASE.SCHEMA.TABLE"
+            }
           },
-          "required": ["fqn"]
+          "required": [
+            "fqn"
+          ]
         }
       }
     },
@@ -292,14 +488,23 @@ FROM SPECIFICATION $$
       "tool_spec": {
         "type": "generic",
         "name": "execute_ddl",
-        "description": "Executes a DDL statement against the configured output schema. Respects dry_run mode — if dry_run=TRUE, logs the DDL without executing. Returns success/failure with row counts.",
+        "description": "Executes a DDL statement against the configured output schema. Respects dry_run mode \u2014 if dry_run=TRUE, logs the DDL without executing. Returns success/failure with row counts.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID for logging" },
-            "ddl": { "type": "string", "description": "The CREATE OR REPLACE TABLE ... AS SELECT DDL. No markdown fences. No trailing semicolon." }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID for logging"
+            },
+            "ddl": {
+              "type": "string",
+              "description": "The CREATE OR REPLACE TABLE ... AS SELECT DDL. No markdown fences. No trailing semicolon."
+            }
           },
-          "required": ["execution_id", "ddl"]
+          "required": [
+            "execution_id",
+            "ddl"
+          ]
         }
       }
     },
@@ -311,10 +516,19 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "table_fqn": { "type": "string", "description": "Fully qualified table name" },
-            "column_name": { "type": "string", "description": "Column name to check" }
+            "table_fqn": {
+              "type": "string",
+              "description": "Fully qualified table name"
+            },
+            "column_name": {
+              "type": "string",
+              "description": "Column name to check"
+            }
           },
-          "required": ["table_fqn", "column_name"]
+          "required": [
+            "table_fqn",
+            "column_name"
+          ]
         }
       }
     },
@@ -326,9 +540,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "fqn": { "type": "string", "description": "Fully qualified target table name" }
+            "fqn": {
+              "type": "string",
+              "description": "Fully qualified target table name"
+            }
           },
-          "required": ["fqn"]
+          "required": [
+            "fqn"
+          ]
         }
       }
     },
@@ -340,10 +559,48 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "fqn": { "type": "string", "description": "Fully qualified source table name" },
-            "n": { "type": "integer", "description": "Number of rows to sample (max 10)" }
+            "fqn": {
+              "type": "string",
+              "description": "Fully qualified source table name"
+            },
+            "n": {
+              "type": "integer",
+              "description": "Number of rows to sample (max 10)"
+            }
           },
-          "required": ["fqn", "n"]
+          "required": [
+            "fqn",
+            "n"
+          ]
+        }
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "record_silver_ddl",
+        "description": "Record the executed Silver DDL for a table into the lineage map. Call after every successful table execution.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "bronze_table": {
+              "type": "string",
+              "description": "str - Bronze table name (unqualified)"
+            },
+            "silver_ddl": {
+              "type": "string",
+              "description": "str - The full CREATE OR REPLACE TABLE SQL that was executed"
+            },
+            "execution_id": {
+              "type": "string",
+              "description": "str - Current execution ID"
+            }
+          },
+          "required": [
+            "bronze_table",
+            "silver_ddl",
+            "execution_id"
+          ]
         }
       }
     }
@@ -352,47 +609,76 @@ FROM SPECIFICATION $$
     "get_columns": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_COLUMNS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "execute_ddl": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_EXECUTE_DDL",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 300 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 300
+      }
     },
     "validate_column": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_VALIDATE_COLUMN",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "check_table_exists": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_CHECK_TABLE_EXISTS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "get_sample_rows": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_SAMPLE_ROWS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
+    },
+    "record_silver_ddl": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_RECORD_SILVER_DDL",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     }
   }
 }
 $$;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 4. VALIDATOR AGENT
--- Verifies Silver table quality using Planner-authoritative PK columns.
--- Tools: count_rows, check_pk_uniqueness, compare_counts, query_sample,
---        get_planner_decision
--- ─────────────────────────────────────────────────────────────────────────────
-
 CREATE OR REPLACE AGENT AGENT_FRAMEWORK.ATS_VALIDATOR_AGENT
 FROM SPECIFICATION $$
 {
-  "models": { "orchestration": "auto" },
-  "orchestration": { "budget": { "seconds": 300, "tokens": 200000 } },
+  "models": {
+    "orchestration": "auto"
+  },
+  "orchestration": {
+    "budget": {
+      "seconds": 300,
+      "tokens": 200000
+    }
+  },
   "instructions": {
-    "orchestration": "You are the Validator for the Agentic Transformation Skill. You verify that each generated Silver table meets quality expectations.\n\nFor each table:\n1. Call get_planner_decision to get the authoritative PK columns — do not guess the PK.\n2. Call count_rows on both source and target to get absolute counts.\n3. Call compare_counts to compute the variance. A variance over 5% is a WARN; over 20% is a FAIL.\n4. Call check_pk_uniqueness on the target Silver table using the PK from step 1. Any duplicates = FAIL.\n5. If any check fails, call query_sample to investigate the specific failure (e.g., query_sample with a WHERE clause targeting the failing rows).\n6. Log PASS, WARN, or FAIL for each table with a specific reason.\n\nBe precise: always use the PK from get_planner_decision, never infer it yourself.",
-    "response": "Return a JSON object with: execution_id, validation_results (array of {table, source_count, target_count, variance_pct, pk_unique, status (PASS/WARN/FAIL), reason}), pass_count, fail_count."
+    "response": "Return a JSON object with: execution_id, validation_results (array of {table, source_count, target_count, variance_pct, pk_unique, status (PASS/WARN/FAIL), reason}), pass_count, fail_count.",
+    "orchestration": "You are the Validator for the Agentic Transformation Skill. You verify that each generated Silver table meets quality expectations.\n\nFor each table:\n1. Call get_planner_decision to get the authoritative PK columns \u2014 do not guess the PK.\n2. Call count_rows on both source and target to get absolute counts.\n3. Call compare_counts to compute the variance. A variance over 5% is a WARN; over 20% is a FAIL.\n4. Call check_pk_uniqueness on the target Silver table using the PK from step 1. Any duplicates = FAIL.\n5. If any check fails, call query_sample to investigate the specific failure (e.g., query_sample with a WHERE clause targeting the failing rows).\n6. Log PASS, WARN, or FAIL for each table with a specific reason.\n\nBe precise: always use the PK from get_planner_decision, never infer it yourself."
   },
   "tools": [
     {
@@ -403,9 +689,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "fqn": { "type": "string", "description": "Fully qualified table name" }
+            "fqn": {
+              "type": "string",
+              "description": "Fully qualified table name"
+            }
           },
-          "required": ["fqn"]
+          "required": [
+            "fqn"
+          ]
         }
       }
     },
@@ -417,10 +708,19 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "fqn": { "type": "string", "description": "Fully qualified Silver table name" },
-            "pk_cols": { "type": "string", "description": "Comma-separated PK column names (e.g. 'PRODUCT_KEY' or 'ORDER_ID, LINE_NUM')" }
+            "fqn": {
+              "type": "string",
+              "description": "Fully qualified Silver table name"
+            },
+            "pk_cols": {
+              "type": "string",
+              "description": "Comma-separated PK column names (e.g. 'PRODUCT_KEY' or 'ORDER_ID, LINE_NUM')"
+            }
           },
-          "required": ["fqn", "pk_cols"]
+          "required": [
+            "fqn",
+            "pk_cols"
+          ]
         }
       }
     },
@@ -432,10 +732,19 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "source_fqn": { "type": "string", "description": "Source Bronze table FQN" },
-            "target_fqn": { "type": "string", "description": "Target Silver table FQN" }
+            "source_fqn": {
+              "type": "string",
+              "description": "Source Bronze table FQN"
+            },
+            "target_fqn": {
+              "type": "string",
+              "description": "Target Silver table FQN"
+            }
           },
-          "required": ["source_fqn", "target_fqn"]
+          "required": [
+            "source_fqn",
+            "target_fqn"
+          ]
         }
       }
     },
@@ -443,14 +752,23 @@ FROM SPECIFICATION $$
       "tool_spec": {
         "type": "generic",
         "name": "query_sample",
-        "description": "Returns sample rows matching a WHERE condition. Use to investigate validation failures — e.g. 'query_sample on Silver WHERE pk IS NULL' to find the root cause.",
+        "description": "Returns sample rows matching a WHERE condition. Use to investigate validation failures \u2014 e.g. 'query_sample on Silver WHERE pk IS NULL' to find the root cause.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "fqn": { "type": "string", "description": "Fully qualified table name" },
-            "where_clause": { "type": "string", "description": "SQL WHERE clause (without the WHERE keyword)" }
+            "fqn": {
+              "type": "string",
+              "description": "Fully qualified table name"
+            },
+            "where_clause": {
+              "type": "string",
+              "description": "SQL WHERE clause (without the WHERE keyword)"
+            }
           },
-          "required": ["fqn", "where_clause"]
+          "required": [
+            "fqn",
+            "where_clause"
+          ]
         }
       }
     },
@@ -458,14 +776,23 @@ FROM SPECIFICATION $$
       "tool_spec": {
         "type": "generic",
         "name": "get_planner_decision",
-        "description": "Returns the Planner's transformation strategy and authoritative PK columns for a table. ALWAYS call this first — use the returned pk_columns for uniqueness checks.",
+        "description": "Returns the Planner's transformation strategy and authoritative PK columns for a table. ALWAYS call this first \u2014 use the returned pk_columns for uniqueness checks.",
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" },
-            "table_name": { "type": "string", "description": "Table name to look up" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            },
+            "table_name": {
+              "type": "string",
+              "description": "Table name to look up"
+            }
           },
-          "required": ["execution_id", "table_name"]
+          "required": [
+            "execution_id",
+            "table_name"
+          ]
         }
       }
     }
@@ -474,46 +801,67 @@ FROM SPECIFICATION $$
     "count_rows": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_COUNT_ROWS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     },
     "check_pk_uniqueness": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_CHECK_PK_UNIQUENESS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     },
     "compare_counts": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_COMPARE_COUNTS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     },
     "query_sample": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_QUERY_SAMPLE",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 60 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     },
     "get_planner_decision": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_PLANNER_DECISION",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     }
   }
 }
 $$;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 5. REFLECTOR AGENT
--- Extracts learnings from the run, deduplicates, saves to knowledge base.
--- Tools: search_learnings, save_learning, get_workflow_log, get_executor_output
--- ─────────────────────────────────────────────────────────────────────────────
-
 CREATE OR REPLACE AGENT AGENT_FRAMEWORK.ATS_REFLECTOR_AGENT
 FROM SPECIFICATION $$
 {
-  "models": { "orchestration": "auto" },
-  "orchestration": { "budget": { "seconds": 180, "tokens": 200000 } },
+  "models": {
+    "orchestration": "auto"
+  },
+  "orchestration": {
+    "budget": {
+      "seconds": 180,
+      "tokens": 200000
+    }
+  },
   "instructions": {
-    "orchestration": "You are the Reflector for the Agentic Transformation Skill. After each pipeline run, you extract learnings that will help future runs be more accurate.\n\nFor this run:\n1. Call get_workflow_log to see all events — focus on FAILED, RETRY, ABORTED, and OK entries.\n2. Call get_executor_output to see which tables succeeded and which failed, and why.\n3. For each significant pattern (success, failure, optimisation opportunity), formulate a learning as an observation + recommendation pair.\n4. Before saving any learning, call search_learnings to check if a very similar learning already exists. If it does, skip saving (the corpus already knows this).\n5. Call save_learning for each new unique insight. Set confidence based on certainty: 0.9+ for clear patterns, 0.7–0.89 for likely patterns, 0.5–0.69 for uncertain.\n\nFocus on actionable patterns: column naming issues, dedup strategies that worked, constraint violations, data quality observations. Avoid saving trivial or obvious learnings.",
-    "response": "Return a JSON object with: execution_id, learnings_evaluated (count), learnings_saved (count), learnings_skipped_duplicate (count), summary (array of saved learning observations)."
+    "response": "Return a JSON object with: execution_id, learnings_evaluated (count), learnings_saved (count), learnings_skipped_duplicate (count), summary (array of saved learning observations).",
+    "orchestration": "You are the Reflector for the Agentic Transformation Skill. After each pipeline run, you extract learnings that will help future runs be more accurate.\n\nFor this run:\n1. Call get_workflow_log to see all events \u2014 focus on FAILED, RETRY, ABORTED, and OK entries.\n2. Call get_executor_output to see which tables succeeded and which failed, and why.\n3. For each significant pattern (success, failure, optimisation opportunity), formulate a learning as an observation + recommendation pair.\n4. Before saving any learning, call search_learnings to check if a very similar learning already exists. If it does, skip saving (the corpus already knows this).\n5. Call save_learning for each new unique insight. Set confidence based on certainty: 0.9+ for clear patterns, 0.7\u20130.89 for likely patterns, 0.5\u20130.69 for uncertain.\n\nFocus on actionable patterns: column naming issues, dedup strategies that worked, constraint violations, data quality observations. Avoid saving trivial or obvious learnings."
   },
   "tools": [
     {
@@ -524,9 +872,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "query": { "type": "string", "description": "Description of the learning you want to save" }
+            "query": {
+              "type": "string",
+              "description": "Description of the learning you want to save"
+            }
           },
-          "required": ["query"]
+          "required": [
+            "query"
+          ]
         }
       }
     },
@@ -538,12 +891,29 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" },
-            "observation": { "type": "string", "description": "What was observed (factual)" },
-            "recommendation": { "type": "string", "description": "What should be done differently next time" },
-            "confidence": { "type": "number", "description": "Confidence score 0.0–1.0" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            },
+            "observation": {
+              "type": "string",
+              "description": "What was observed (factual)"
+            },
+            "recommendation": {
+              "type": "string",
+              "description": "What should be done differently next time"
+            },
+            "confidence": {
+              "type": "number",
+              "description": "Confidence score 0.0\u20131.0"
+            }
           },
-          "required": ["execution_id", "observation", "recommendation", "confidence"]
+          "required": [
+            "execution_id",
+            "observation",
+            "recommendation",
+            "confidence"
+          ]
         }
       }
     },
@@ -555,9 +925,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
         }
       }
     },
@@ -569,9 +944,45 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
+        }
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "check_pipeline_staleness",
+        "description": "Compares live Bronze row counts vs stored counts. Returns tables where Bronze data has changed since last pipeline run.",
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "get_silver_ddl",
+        "description": "Returns stored Silver DDL and parsed column list for a Bronze table.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "bronze_table": {
+              "type": "string",
+              "description": "str - Unqualified Bronze table name"
+            }
+          },
+          "required": [
+            "bronze_table"
+          ]
         }
       }
     }
@@ -580,45 +991,76 @@ FROM SPECIFICATION $$
     "search_learnings": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_SEARCH_LEARNINGS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "save_learning": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_SAVE_LEARNING",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "get_workflow_log": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_WORKFLOW_LOG",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "get_executor_output": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_EXECUTOR_OUTPUT",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
+    },
+    "check_pipeline_staleness": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_CHECK_PIPELINE_STALENESS",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
+    },
+    "get_silver_ddl": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_SILVER_DDL",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     }
   }
 }
 $$;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 6. ORCHESTRATOR AGENT
--- Coordinates the 5 sub-agents in sequence. Manages execution lifecycle.
--- Bridges to v3 SPs during the transition period.
--- Tools: create_execution, get_workflow_status, update_workflow_status,
---        log_workflow_event, list_silver_gaps,
---        run_schema_analyst (v3 bridge), run_planner, run_executor,
---        run_validator, run_reflector
--- ─────────────────────────────────────────────────────────────────────────────
-
 CREATE OR REPLACE AGENT AGENT_FRAMEWORK.ATS_ORCHESTRATOR_AGENT
 FROM SPECIFICATION $$
 {
-  "models": { "orchestration": "auto" },
-  "orchestration": { "budget": { "seconds": 900, "tokens": 500000 } },
+  "models": {
+    "orchestration": "auto"
+  },
+  "orchestration": {
+    "budget": {
+      "seconds": 900,
+      "tokens": 500000
+    }
+  },
   "instructions": {
-    "orchestration": "You are the Orchestrator for the Agentic Transformation Skill v4. You coordinate the five pipeline phases in sequence and manage the full execution lifecycle.\n\nWorkflow:\n1. Call list_silver_gaps to see which Bronze tables need Silver transformation.\n2. Call create_execution with trigger_source and tables_json (JSON array of FQNs) to register the run.\n3. Call log_workflow_event to record the start.\n4. Run Phase 1 — Schema Analyst: call run_schema_analyst with the execution_id.\n5. Call update_workflow_status to mark PLANNER phase starting.\n6. Run Phase 2 — Planner: call run_planner with the execution_id.\n7. Call update_workflow_status to mark EXECUTOR phase starting.\n8. Run Phase 3 — Executor: call run_executor with the execution_id.\n9. Call update_workflow_status to mark VALIDATOR phase starting.\n10. Run Phase 4 — Validator: call run_validator with the execution_id.\n11. Call update_workflow_status to mark REFLECTOR phase starting.\n12. Run Phase 5 — Reflector: call run_reflector with the execution_id.\n13. Call update_workflow_status with status COMPLETE.\n14. Call log_workflow_event to record completion.\n\nIf any phase returns an error, call log_workflow_event with status ERROR, call update_workflow_status with status ERROR, and stop. Do not proceed to the next phase on error.\n\nCurrently using v3 SP bridges (run_schema_analyst etc.) — these will be replaced with direct sub-agent calls as each agent matures.",
-    "response": "Return a JSON object with: execution_id, phases_completed, final_status (COMPLETE/ERROR), tables_processed, success_count, fail_count, duration_seconds."
+    "response": "Return a JSON object with: execution_id, phases_completed, final_status (COMPLETE/ERROR), tables_processed, success_count, fail_count, duration_seconds.",
+    "orchestration": "You are the Orchestrator for the Agentic Transformation Skill v4. You coordinate the five pipeline phases in sequence and manage the full execution lifecycle.\n\nWorkflow:\n1. Call list_silver_gaps to see which Bronze tables need Silver transformation.\n2. Call create_execution with trigger_source and tables_json (JSON array of FQNs) to register the run.\n3. Call log_workflow_event to record the start.\n4. Run Phase 1 \u2014 Schema Analyst: call run_schema_analyst with the execution_id.\n5. Call update_workflow_status to mark PLANNER phase starting.\n6. Run Phase 2 \u2014 Planner: call run_planner with the execution_id.\n7. Call update_workflow_status to mark EXECUTOR phase starting.\n8. Run Phase 3 \u2014 Executor: call run_executor with the execution_id.\n9. Call update_workflow_status to mark VALIDATOR phase starting.\n10. Run Phase 4 \u2014 Validator: call run_validator with the execution_id.\n11. Call update_workflow_status to mark REFLECTOR phase starting.\n12. Run Phase 5 \u2014 Reflector: call run_reflector with the execution_id.\n13. Call update_workflow_status with status COMPLETE.\n14. Call log_workflow_event to record completion.\n\nIf any phase returns an error, call log_workflow_event with status ERROR, call update_workflow_status with status ERROR, and stop. Do not proceed to the next phase on error.\n\nCurrently using v3 SP bridges (run_schema_analyst etc.) \u2014 these will be replaced with direct sub-agent calls as each agent matures."
   },
   "tools": [
     {
@@ -626,7 +1068,10 @@ FROM SPECIFICATION $$
         "type": "generic",
         "name": "list_silver_gaps",
         "description": "Returns all Bronze tables that currently have no Silver coverage (silver_status = PENDING). Use to determine which tables to include in a run.",
-        "input_schema": { "type": "object", "properties": {} }
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
       }
     },
     {
@@ -637,10 +1082,18 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "trigger_source": { "type": "string", "description": "Who triggered the run: 'manual', 'automated', 'scheduled'" },
-            "tables_json": { "type": "string", "description": "JSON array of fully-qualified table FQNs to process, or null for all SILVER_GAPS" }
+            "trigger_source": {
+              "type": "string",
+              "description": "Who triggered the run: 'manual', 'automated', 'scheduled'"
+            },
+            "tables_json": {
+              "type": "string",
+              "description": "JSON array of fully-qualified table FQNs to process, or null for all SILVER_GAPS"
+            }
           },
-          "required": ["trigger_source"]
+          "required": [
+            "trigger_source"
+          ]
         }
       }
     },
@@ -652,9 +1105,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
         }
       }
     },
@@ -666,11 +1124,24 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" },
-            "phase": { "type": "string", "description": "Current phase: SCHEMA_ANALYST, PLANNER, EXECUTOR, VALIDATOR, REFLECTOR, COMPLETE, ERROR" },
-            "status": { "type": "string", "description": "Status: RUNNING, COMPLETE, ERROR, FAILED" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            },
+            "phase": {
+              "type": "string",
+              "description": "Current phase: SCHEMA_ANALYST, PLANNER, EXECUTOR, VALIDATOR, REFLECTOR, COMPLETE, ERROR"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status: RUNNING, COMPLETE, ERROR, FAILED"
+            }
           },
-          "required": ["execution_id", "phase", "status"]
+          "required": [
+            "execution_id",
+            "phase",
+            "status"
+          ]
         }
       }
     },
@@ -682,12 +1153,29 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" },
-            "phase": { "type": "string", "description": "Phase name" },
-            "status": { "type": "string", "description": "Status: STARTED, COMPLETE, ERROR, OK" },
-            "message": { "type": "string", "description": "Human-readable event description" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            },
+            "phase": {
+              "type": "string",
+              "description": "Phase name"
+            },
+            "status": {
+              "type": "string",
+              "description": "Status: STARTED, COMPLETE, ERROR, OK"
+            },
+            "message": {
+              "type": "string",
+              "description": "Human-readable event description"
+            }
           },
-          "required": ["execution_id", "phase", "status", "message"]
+          "required": [
+            "execution_id",
+            "phase",
+            "status",
+            "message"
+          ]
         }
       }
     },
@@ -699,9 +1187,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
         }
       }
     },
@@ -713,9 +1206,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
         }
       }
     },
@@ -727,9 +1225,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
         }
       }
     },
@@ -741,9 +1244,14 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
         }
       }
     },
@@ -755,9 +1263,64 @@ FROM SPECIFICATION $$
         "input_schema": {
           "type": "object",
           "properties": {
-            "execution_id": { "type": "string", "description": "The workflow execution ID" }
+            "execution_id": {
+              "type": "string",
+              "description": "The workflow execution ID"
+            }
           },
-          "required": ["execution_id"]
+          "required": [
+            "execution_id"
+          ]
+        }
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "check_pipeline_staleness",
+        "description": "Compares live Bronze row counts vs stored counts. Returns tables where Bronze data has changed since last pipeline run.",
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "get_table_impact",
+        "description": "Returns downstream Silver dependencies and FK relationships for a given table.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "table_name": {
+              "type": "string",
+              "description": "str - Unqualified Bronze table name"
+            }
+          },
+          "required": [
+            "table_name"
+          ]
+        }
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "get_silver_ddl",
+        "description": "Returns stored Silver DDL and parsed column list for a Bronze table.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "bronze_table": {
+              "type": "string",
+              "description": "str - Unqualified Bronze table name"
+            }
+          },
+          "required": [
+            "bronze_table"
+          ]
         }
       }
     }
@@ -766,52 +1329,119 @@ FROM SPECIFICATION $$
     "list_silver_gaps": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_LIST_SILVER_GAPS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "create_execution": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_CREATE_EXECUTION",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "get_workflow_status": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_WORKFLOW_STATUS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "update_workflow_status": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_UPDATE_WORKFLOW_STATUS",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "log_workflow_event": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_LOG_WORKFLOW_EVENT",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 30 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 30
+      }
     },
     "run_schema_analyst": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_RUN_SCHEMA_ANALYST",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 300 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 300
+      }
     },
     "run_planner": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_RUN_PLANNER",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 300 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 300
+      }
     },
     "run_executor": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_RUN_EXECUTOR",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 600 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 600
+      }
     },
     "run_validator": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_RUN_VALIDATOR",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 300 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 300
+      }
     },
     "run_reflector": {
       "type": "procedure",
       "identifier": "AGENT_FRAMEWORK.ATS_TOOL_RUN_REFLECTOR",
-      "execution_environment": { "type": "warehouse", "warehouse": "", "query_timeout": 300 }
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 300
+      }
+    },
+    "check_pipeline_staleness": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_CHECK_PIPELINE_STALENESS",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
+    },
+    "get_table_impact": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_TABLE_IMPACT",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
+    },
+    "get_silver_ddl": {
+      "type": "procedure",
+      "identifier": "AGENT_FRAMEWORK.ATS_TOOL_GET_SILVER_DDL",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "",
+        "query_timeout": 60
+      }
     }
   }
 }
